@@ -90,11 +90,111 @@
       border: 1px solid var(--line);
       border-radius: 12px;
       padding: 9px 10px;
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
       line-height: 1.45;
       font-size: .92rem;
       animation: rise .2s ease-out;
+    }
+
+    .msg-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: .74rem;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+
+    .msg-body {
+      overflow-wrap: anywhere;
+    }
+
+    .msg-body p {
+      margin: 0 0 9px;
+      white-space: pre-wrap;
+    }
+
+    .msg-body p:last-child {
+      margin-bottom: 0;
+    }
+
+    .msg-body h4 {
+      margin: 10px 0 6px;
+      font-size: .95rem;
+      color: #d9e8ff;
+    }
+
+    .msg-body ul,
+    .msg-body ol {
+      margin: 6px 0 10px 18px;
+      padding: 0;
+    }
+
+    .msg-body li {
+      margin: 3px 0;
+    }
+
+    .msg-body blockquote {
+      margin: 8px 0;
+      padding: 7px 10px;
+      border-left: 3px solid var(--accent);
+      background: rgba(54, 209, 183, 0.07);
+      color: #d3e2f7;
+    }
+
+    .msg-body hr {
+      border: none;
+      border-top: 1px solid var(--line);
+      margin: 10px 0;
+    }
+
+    .inline-code {
+      display: inline-block;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 0 6px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      background: rgba(255, 255, 255, 0.06);
+      font-size: .85em;
+    }
+
+    .code-wrap {
+      margin: 8px 0;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgba(0, 0, 0, 0.28);
+      overflow: hidden;
+    }
+
+    .code-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 8px;
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+      font-size: .75rem;
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    .copy-btn {
+      width: auto;
+      border-radius: 7px;
+      padding: 3px 8px;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid var(--line);
+      color: var(--text);
+      font-size: .74rem;
+      cursor: pointer;
+    }
+
+    .code-wrap pre {
+      margin: 0;
+      padding: 9px;
+      overflow: auto;
+      line-height: 1.35;
+      font-size: .84rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      white-space: pre;
     }
 
     .msg.user {
@@ -237,14 +337,13 @@
       <div id="chatStatus" class="status"></div>
       <div id="chatKpi" class="kpi"></div>
 
-      <div id="timeline" class="timeline">
-        <div class="msg assistant">你好，我是 Agent Hub。点击左侧会话可切换历史，或新建会话开始聊天。</div>
-      </div>
+      <div id="timeline" class="timeline"></div>
 
       <div class="composer">
         <div class="row" style="margin-bottom:0;">
           <label for="message">Message</label>
           <textarea id="message"></textarea>
+          <div class="small">回车发送，Shift+回车换行。</div>
         </div>
         <button id="chatBtn">发送消息</button>
       </div>
@@ -281,13 +380,160 @@
   let sessionTotal = 0;
   let activeSessionId = sessionIdInput.value.trim();
 
+  function nowTime() {
+    return new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+  }
+
+  function escapeHtml(text) {
+    return (text || "").replace(/[&<>\"']/g, (m) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;"
+    }[m]));
+  }
+
+  function renderInline(text) {
+    return escapeHtml(text).replace(/`([^`]+)`/g, '<span class="inline-code">$1</span>');
+  }
+
+  function parseRichText(text) {
+    const src = text || "";
+    const blocks = [];
+    const re = /```([\w-]+)?\n([\s\S]*?)```/g;
+    let idx = 0;
+    let m;
+    while ((m = re.exec(src)) !== null) {
+      const before = src.slice(idx, m.index);
+      if (before) blocks.push({ type: "text", value: before });
+      blocks.push({ type: "code", lang: (m[1] || "text").toLowerCase(), value: m[2] || "" });
+      idx = re.lastIndex;
+    }
+    if (idx < src.length) blocks.push({ type: "text", value: src.slice(idx) });
+    return blocks;
+  }
+
+  function renderTextSegment(segment) {
+    const lines = segment.replace(/\r\n/g, "\n").split("\n");
+    const out = [];
+    let inUl = false;
+    let inOl = false;
+
+    function closeLists() {
+      if (inUl) out.push("</ul>");
+      if (inOl) out.push("</ol>");
+      inUl = false;
+      inOl = false;
+    }
+
+    for (const raw of lines) {
+      const t = raw.trim();
+      if (!t) {
+        closeLists();
+        continue;
+      }
+
+      const h = t.match(/^(#{1,4})\s+(.*)$/);
+      if (h) {
+        closeLists();
+        out.push(`<h4>${renderInline(h[2])}</h4>`);
+        continue;
+      }
+
+      if (/^---+$/.test(t)) {
+        closeLists();
+        out.push("<hr>");
+        continue;
+      }
+
+      if (t.startsWith(">")) {
+        closeLists();
+        out.push(`<blockquote>${renderInline(t.replace(/^>\s*/, ""))}</blockquote>`);
+        continue;
+      }
+
+      const ul = t.match(/^[-*]\s+(.*)$/);
+      if (ul) {
+        if (inOl) {
+          out.push("</ol>");
+          inOl = false;
+        }
+        if (!inUl) {
+          out.push("<ul>");
+          inUl = true;
+        }
+        out.push(`<li>${renderInline(ul[1])}</li>`);
+        continue;
+      }
+
+      const ol = t.match(/^\d+[.)]\s+(.*)$/);
+      if (ol) {
+        if (inUl) {
+          out.push("</ul>");
+          inUl = false;
+        }
+        if (!inOl) {
+          out.push("<ol>");
+          inOl = true;
+        }
+        out.push(`<li>${renderInline(ol[1])}</li>`);
+        continue;
+      }
+
+      closeLists();
+      out.push(`<p>${renderInline(t)}</p>`);
+    }
+
+    closeLists();
+    return out.join("\n");
+  }
+
+  function renderRichMessage(container, text) {
+    const parts = parseRichText(text);
+    const html = parts.map((part) => {
+      if (part.type === "code") {
+        const isShell = ["bash", "sh", "zsh", "shell", "cmd", "powershell"].includes(part.lang);
+        const title = isShell ? "命令行" : part.lang;
+        const content = escapeHtml(part.value);
+        const copyPayload = content
+          .replace(/&quot;/g, "\"")
+          .replace(/&lt;/g, "<")
+          .replace(/&gt;/g, ">")
+          .replace(/&amp;/g, "&");
+        return `
+          <div class="code-wrap">
+            <div class="code-top">
+              <span>${title}</span>
+              <button class="copy-btn" data-copy="${escapeHtml(copyPayload)}">复制</button>
+            </div>
+            <pre><code>${content}</code></pre>
+          </div>
+        `;
+      }
+      return renderTextSegment(part.value);
+    }).join("\n");
+
+    container.innerHTML = html || `<p>${renderInline(text || "")}</p>`;
+  }
+
   function appendMessage(role, initialText = "") {
-    const el = document.createElement("div");
-    el.className = `msg ${role}`;
-    el.textContent = initialText;
-    timeline.appendChild(el);
+    const wrap = document.createElement("div");
+    wrap.className = `msg ${role}`;
+
+    const head = document.createElement("div");
+    head.className = "msg-head";
+    head.innerHTML = `<span>${role === "user" ? "你" : "助手"}</span><span>${nowTime()}</span>`;
+
+    const body = document.createElement("div");
+    body.className = "msg-body";
+    body.textContent = initialText;
+
+    wrap.appendChild(head);
+    wrap.appendChild(body);
+    timeline.appendChild(wrap);
     timeline.scrollTop = timeline.scrollHeight;
-    return el;
+    return { wrap, body };
   }
 
   function clearTimeline() {
@@ -297,25 +543,28 @@
   function renderHistory(history) {
     clearTimeline();
     if (!Array.isArray(history) || history.length === 0) {
-      appendMessage("assistant", "当前会话暂无历史，你可以直接开始提问。");
+      const msg = appendMessage("assistant", "");
+      renderRichMessage(msg.body, "当前会话暂无历史，你可以直接开始提问。");
       return;
     }
 
     history.forEach((item) => {
       const role = item.role === "user" ? "user" : "assistant";
-      appendMessage(role, item.content || "");
+      const msg = appendMessage(role, "");
+      renderRichMessage(msg.body, item.content || "");
     });
   }
 
   async function typeText(el, text, speed = 16) {
-    el.classList.add("typing");
-    el.textContent = "";
+    el.body.classList.add("typing");
+    el.body.textContent = "";
     for (let i = 0; i < text.length; i += 1) {
-      el.textContent += text[i];
+      el.body.textContent += text[i];
       if (i % 2 === 0) timeline.scrollTop = timeline.scrollHeight;
       await new Promise((resolve) => setTimeout(resolve, speed));
     }
-    el.classList.remove("typing");
+    el.body.classList.remove("typing");
+    renderRichMessage(el.body, text);
     timeline.scrollTop = timeline.scrollHeight;
   }
 
@@ -387,7 +636,8 @@
 
       const sessionId = sessionIdInput.value.trim();
       activeSessionId = sessionId;
-      appendMessage("user", userInput);
+      const userMsg = appendMessage("user", "");
+      renderRichMessage(userMsg.body, userInput);
       const assistantEl = appendMessage("assistant", "思考中...");
 
       const payload = {
@@ -428,16 +678,38 @@
       await loadSessionList();
     } catch (e) {
       setStatus(chatStatus, e.message, "error");
-      appendMessage("assistant", "请求失败，请检查 API Key / 服务状态。\n" + e.message);
+      const errMsg = appendMessage("assistant", "");
+      renderRichMessage(errMsg.body, "请求失败，请检查 API Key / 服务状态。\n" + e.message);
     } finally {
       isSending = false;
     }
   });
 
   messageInput.addEventListener("keydown", (event) => {
-    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+    if (event.isComposing) {
+      return;
+    }
+    if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       chatBtn.click();
+    }
+  });
+
+  timeline.addEventListener("click", async (event) => {
+    const copyBtn = event.target.closest(".copy-btn");
+    if (!copyBtn) {
+      return;
+    }
+    const raw = copyBtn.getAttribute("data-copy") || "";
+    try {
+      await navigator.clipboard.writeText(raw);
+      const old = copyBtn.textContent;
+      copyBtn.textContent = "已复制";
+      setTimeout(() => {
+        copyBtn.textContent = old;
+      }, 1200);
+    } catch (_) {
+      setStatus(chatStatus, "复制失败，请手动复制", "error");
     }
   });
 
@@ -457,7 +729,8 @@
     activeSessionId = newId;
     sessionIdInput.value = newId;
     clearTimeline();
-    appendMessage("assistant", "新会话已创建，开始提问吧。\n(提示：消息发送后该会话会自动进入列表)");
+    const hint = appendMessage("assistant", "");
+    renderRichMessage(hint.body, "新会话已创建，开始提问吧。\n(提示：消息发送后该会话会自动进入列表)");
     setStatus(chatStatus, `已创建新会话: ${newId}`, "ok");
     await loadSessionList();
   });
