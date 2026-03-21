@@ -8,6 +8,7 @@ import org.springframework.web.client.RestClient;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Service
 /**
@@ -18,6 +19,7 @@ import java.util.Map;
 public class McpClientService {
 
     private final RestClient restClient;
+    private final AtomicBoolean initialized = new AtomicBoolean(false);
 
     public McpClientService(AppProperties appProperties) {
         this.restClient = RestClient.builder()
@@ -26,6 +28,8 @@ public class McpClientService {
     }
 
     public String callTool(String toolName, String text) {
+        ensureInitialized();
+
         // 组装工具参数。
         Map<String, Object> arguments = new HashMap<>();
         arguments.put("text", text);
@@ -53,6 +57,62 @@ public class McpClientService {
             // 工具异常时返回空字符串，避免主链路直接失败。
             return "";
         }
+
+        // 标准 MCP tools/call 返回 content block 数组。
+        if (result.isArray() && !result.isEmpty()) {
+            JsonNode first = result.get(0);
+            JsonNode textNode = first.path("text");
+            if (!textNode.isMissingNode() && textNode.isTextual()) {
+                return textNode.asText();
+            }
+        }
+
+        // 兼容旧格式（content 直接为字符串）。
         return result.asText("");
+    }
+
+    /**
+     * 按标准 MCP 流程先 initialize，再发送 notifications/initialized。
+     */
+    private void ensureInitialized() {
+        if (initialized.get()) {
+            return;
+        }
+        synchronized (initialized) {
+            if (initialized.get()) {
+                return;
+            }
+
+            Map<String, Object> initializeRequest = new HashMap<>();
+            initializeRequest.put("jsonrpc", "2.0");
+            initializeRequest.put("id", "mcp-init");
+            initializeRequest.put("method", "initialize");
+            initializeRequest.put("params", Map.of(
+                    "protocolVersion", "2024-11-05",
+                    "capabilities", Map.of(),
+                    "clientInfo", Map.of("name", "agent-hub-client", "version", "1.0.0")
+            ));
+
+            restClient.post()
+                    .uri("/mcp")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(initializeRequest)
+                    .retrieve()
+                    .body(JsonNode.class);
+
+            Map<String, Object> initializedNotification = new HashMap<>();
+            initializedNotification.put("jsonrpc", "2.0");
+            initializedNotification.put("method", "notifications/initialized");
+            initializedNotification.put("params", Map.of());
+
+            restClient.post()
+                    .uri("/mcp")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(initializedNotification)
+                    .retrieve()
+                    .toBodilessEntity();
+
+            initialized.set(true);
+        }
     }
 }

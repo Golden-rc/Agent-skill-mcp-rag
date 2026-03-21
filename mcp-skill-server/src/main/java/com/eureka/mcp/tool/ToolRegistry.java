@@ -25,7 +25,17 @@ public class ToolRegistry {
         return toolsByName.values().stream()
                 .map(tool -> Map.<String, Object>of(
                         "name", tool.name(),
-                        "description", tool.description()
+                        "description", tool.description(),
+                        "inputSchema", Map.of(
+                                "type", "object",
+                                "properties", Map.of(
+                                        "text", Map.of(
+                                                "type", "string",
+                                                "description", "Input text for tool processing"
+                                        )
+                                ),
+                                "required", List.of("text")
+                        )
                 ))
                 .toList();
     }

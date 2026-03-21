@@ -150,6 +150,18 @@ docker exec agenthub-ollama ollama pull qwen2.5:1.5b
 - `src/main/resources/static/rag.html` rag management page
 - `src/main/resources/static/sessions.html` session management page
 
+## MCP protocol support
+
+This project now follows standard MCP handshake + tools flow:
+
+- `initialize`
+- `notifications/initialized`
+- `tools/list`
+- `tools/call`
+- `ping`
+
+`tools/call` responses use MCP content blocks (`result.content: [{type:"text", text:"..."}]`).
+
 ## OpenCode completion reminder (macOS)
 
 - `scripts/notify.sh`: send a local desktop notification

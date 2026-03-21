@@ -19,6 +19,8 @@ import java.util.Map;
  */
 public class McpController {
 
+    private static final String PROTOCOL_VERSION = "2024-11-05";
+
     private final ToolRegistry toolRegistry;
 
     public McpController(ToolRegistry toolRegistry) {
@@ -29,9 +31,33 @@ public class McpController {
     /**
      * 统一 MCP JSON-RPC 入口。
      */
-    public ResponseEntity<Map<String, Object>> handle(@RequestBody Map<String, Object> request) {
+    public ResponseEntity<Object> handle(@RequestBody Map<String, Object> request) {
         String method = String.valueOf(request.get("method"));
-        Object id = request.getOrDefault("id", "1");
+        Object id = request.get("id");
+        boolean notification = (id == null);
+
+        if ("initialize".equals(method)) {
+            Map<String, Object> result = Map.of(
+                    "protocolVersion", PROTOCOL_VERSION,
+                    "capabilities", Map.of(
+                            "tools", Map.of("listChanged", false)
+                    ),
+                    "serverInfo", Map.of(
+                            "name", "agent-hub-mcp-skill-server",
+                            "version", "1.0.0"
+                    )
+            );
+            return ResponseEntity.ok(ok(id, result));
+        }
+
+        if ("notifications/initialized".equals(method)) {
+            // JSON-RPC notification: no response body.
+            return ResponseEntity.noContent().build();
+        }
+
+        if ("ping".equals(method)) {
+            return ResponseEntity.ok(ok(id, Map.of()));
+        }
 
         if ("tools/list".equals(method)) {
             return ResponseEntity.ok(ok(id, Map.of(
@@ -51,9 +77,17 @@ public class McpController {
                 return ResponseEntity.ok(error(id, -32601, "tool not found: " + name));
             }
 
-            return ResponseEntity.ok(ok(id, Map.of("content", content)));
+            return ResponseEntity.ok(ok(id, Map.of(
+                    "content", java.util.List.of(
+                            Map.of("type", "text", "text", content)
+                    ),
+                    "isError", false
+            )));
         }
 
+        if (notification) {
+            return ResponseEntity.noContent().build();
+        }
         return ResponseEntity.ok(error(id, -32601, "method not found: " + method));
     }
 
