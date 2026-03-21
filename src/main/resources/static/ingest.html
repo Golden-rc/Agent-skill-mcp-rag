@@ -40,16 +40,20 @@
     </article>
 
     <article class="card">
-      <h2>文件写入</h2>
+      <h2>文件写入（支持批量）</h2>
       <div class="row">
-        <label for="fileSource">Source（可选）</label>
-        <input id="fileSource" placeholder="留空则使用文件名">
+        <label for="sourcePrefix">Source 前缀（可选）</label>
+        <input id="sourcePrefix" placeholder="例如：rag-docs/2026-03">
       </div>
       <div class="row">
         <label for="fileInput">File</label>
-        <input id="fileInput" type="file" accept=".txt,.md,.pdf,.doc,.docx,.rtf,.html,.csv">
+        <input id="fileInput" type="file" multiple accept=".txt,.md,.pdf,.doc,.docx,.rtf,.html,.csv">
       </div>
-      <button id="ingestFileBtn">上传文件并写入</button>
+      <div class="row" style="display:flex; align-items:center; gap:8px;">
+        <input id="continueOnError" type="checkbox" checked>
+        <label for="continueOnError" style="margin:0;">遇到单个文件错误继续处理其余文件</label>
+      </div>
+      <button id="ingestFilesBtn">批量上传并写入</button>
       <div id="fileStatus" class="status"></div>
       <div id="fileOutput" class="output">等待上传...</div>
     </article>
@@ -59,7 +63,7 @@
 <script src="/common.js"></script>
 <script>
   const ingestTextBtn = document.getElementById("ingestTextBtn");
-  const ingestFileBtn = document.getElementById("ingestFileBtn");
+  const ingestFilesBtn = document.getElementById("ingestFilesBtn");
 
   const textStatus = document.getElementById("textStatus");
   const textOutput = document.getElementById("textOutput");
@@ -81,31 +85,33 @@
     }
   });
 
-  ingestFileBtn.addEventListener("click", async () => {
+  ingestFilesBtn.addEventListener("click", async () => {
     try {
-      const file = document.getElementById("fileInput").files[0];
-      if (!file) {
-        setStatus(fileStatus, "请先选择文件", "error");
+      const files = Array.from(document.getElementById("fileInput").files || []);
+      if (files.length === 0) {
+        setStatus(fileStatus, "请先选择至少一个文件", "error");
         return;
       }
 
-      setStatus(fileStatus, "上传中...");
+      setStatus(fileStatus, `上传中（${files.length} 个文件）...`);
       const formData = new FormData();
-      formData.append("file", file);
+      files.forEach((file) => formData.append("files", file));
 
-      const source = document.getElementById("fileSource").value.trim();
-      if (source) {
-        formData.append("source", source);
+      const sourcePrefix = document.getElementById("sourcePrefix").value.trim();
+      if (sourcePrefix) {
+        formData.append("sourcePrefix", sourcePrefix);
       }
+      const continueOnError = document.getElementById("continueOnError").checked;
+      formData.append("continueOnError", String(continueOnError));
 
-      const res = await fetch("/rag/ingest/file", {
+      const res = await fetch("/rag/ingest/files", {
         method: "POST",
         body: formData
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
 
-      setStatus(fileStatus, "文件写入成功", "ok");
+      setStatus(fileStatus, `完成：成功 ${data.success || 0}，失败 ${data.failed || 0}，chunks ${data.totalChunks || 0}`, "ok");
       fileOutput.textContent = JSON.stringify(data, null, 2);
     } catch (e) {
       setStatus(fileStatus, e.message, "error");
