@@ -37,7 +37,9 @@ class ChatControllerTest {
                 "ok",
                 "openai",
                 List.of(new RagHit("kb", "doc chunk", 0.9)),
-                List.of("extract_todos")
+                List.of("extract_todos"),
+                "rag",
+                "manual-rag"
         );
         when(chatService.chat(any())).thenReturn(response);
 
@@ -54,7 +56,9 @@ class ChatControllerTest {
                 .andExpect(jsonPath("$.answer").value("ok"))
                 .andExpect(jsonPath("$.providerUsed").value("openai"))
                 .andExpect(jsonPath("$.citations[0].source").value("kb"))
-                .andExpect(jsonPath("$.toolCalls[0]").value("extract_todos"));
+                .andExpect(jsonPath("$.toolCalls[0]").value("extract_todos"))
+                .andExpect(jsonPath("$.modeUsed").value("rag"))
+                .andExpect(jsonPath("$.modeReason").value("manual-rag"));
     }
 
     @Test

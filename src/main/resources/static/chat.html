@@ -400,6 +400,8 @@
       const data = await api("/chat", { method: "POST", body: JSON.stringify(payload) });
       chatKpi.innerHTML =
         `<span class="tag">provider: ${esc(data.providerUsed || "-")}</span>` +
+        `<span class="tag">mode: ${esc(data.modeUsed || "-")}</span>` +
+        `<span class="tag">reason: ${esc(data.modeReason || "-")}</span>` +
         `<span class="tag">tools: ${esc((data.toolCalls || []).join(", ") || "none")}</span>` +
         `<span class="tag">citations: ${(data.citations || []).length}</span>`;
 
@@ -414,9 +416,11 @@
 
       chatMeta.textContent = JSON.stringify({
         provider: data.providerUsed,
+        modeUsed: data.modeUsed,
+        modeReason: data.modeReason,
         toolCalls: data.toolCalls || [],
         citations: (data.citations || []).length,
-        mode: modeSelect.value,
+        requestMode: modeSelect.value,
         sessionId
       }, null, 2);
 

@@ -45,7 +45,10 @@ public class ChatService {
         String provider = providerRouter.pickProvider(request.getProvider());
         String userMessage = request.getMessage();
         String mode = normalizeMode(request.getMode());
-        String effectiveMode = "auto".equals(mode) ? classifyAutoMode(provider, userMessage) : mode;
+        ModeDecision modeDecision = "auto".equals(mode)
+                ? classifyAutoMode(provider, userMessage)
+                : new ModeDecision(mode, "manual-" + mode);
+        String effectiveMode = modeDecision.mode();
         boolean directMode = "direct".equals(effectiveMode);
 
         // 2) 严格直答模式不带历史，避免被旧上下文污染。
@@ -77,18 +80,18 @@ public class ChatService {
         memoryService.append(request.getSessionId(), new ChatMessage("user", userMessage));
         memoryService.append(request.getSessionId(), new ChatMessage("assistant", answer));
 
-        return new ChatResponse(answer, provider, hits, toolCalls);
+        return new ChatResponse(answer, provider, hits, toolCalls, effectiveMode, modeDecision.reason());
     }
 
-    private String classifyAutoMode(String provider, String message) {
+    private ModeDecision classifyAutoMode(String provider, String message) {
         // 第一层：快速规则，优先拦截简单问题。
         if (isSimpleQuestion(message)) {
-            return "direct";
+            return new ModeDecision("direct", "rule-simple");
         }
 
         // 第二层：显式知识库任务关键词，优先走增强模式。
         if (isLikelyKnowledgeTask(message)) {
-            return "rag";
+            return new ModeDecision("rag", "rule-keyword");
         }
 
         // 第三层：让模型做轻量意图分类。
@@ -103,16 +106,16 @@ public class ChatService {
             );
             String result = modelClientService.chat(provider, prompt).trim().toLowerCase(Locale.ROOT);
             if (result.contains("direct")) {
-                return "direct";
+                return new ModeDecision("direct", "llm-classifier");
             }
             if (result.contains("rag")) {
-                return "rag";
+                return new ModeDecision("rag", "llm-classifier");
             }
         } catch (Exception ignored) {
         }
 
         // 默认偏向知识增强，避免遗漏业务上下文。
-        return "rag";
+        return new ModeDecision("rag", "fallback-rag");
     }
 
     private String normalizeMode(String requestMode) {
@@ -149,6 +152,9 @@ public class ChatService {
                 || normalized.contains("待办")
                 || normalized.contains("rag")
                 || normalized.contains("agent");
+    }
+
+    private record ModeDecision(String mode, String reason) {
     }
 
     private String routeToolIfNeeded(String message, List<String> toolCalls) {
