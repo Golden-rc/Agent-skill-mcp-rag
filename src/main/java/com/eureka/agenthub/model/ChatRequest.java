@@ -15,6 +15,8 @@ public class ChatRequest {
     private String message;
     /** 模型提供方：auto/openai/ollama。 */
     private String provider = "auto";
+    /** 回答模式：auto/direct/rag。 */
+    private String mode = "auto";
 
     public String getSessionId() {
         return sessionId;
@@ -38,5 +40,13 @@ public class ChatRequest {
 
     public void setProvider(String provider) {
         this.provider = provider;
+    }
+
+    public String getMode() {
+        return mode;
+    }
+
+    public void setMode(String mode) {
+        this.mode = mode;
     }
 }

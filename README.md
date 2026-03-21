@@ -76,6 +76,14 @@ curl -X POST http://localhost:8080/rag/ingest \
   }'
 ```
 
+Ingest file document:
+
+```bash
+curl -X POST http://localhost:8080/rag/ingest/file \
+  -F "file=@/path/to/your/doc.pdf" \
+  -F "source=custom-source"
+```
+
 Chat with auto provider (OpenAI if key exists, else Ollama):
 
 ```bash
@@ -84,9 +92,15 @@ curl -X POST http://localhost:8080/chat \
   -d '{
     "sessionId":"demo-1",
     "provider":"auto",
+    "mode":"auto",
     "message":"请基于知识库给我一个实习项目计划，并总结成待办"
   }'
 ```
+
+`mode` options:
+- `auto`: short/simple question uses direct answer, others use RAG
+- `direct`: strict direct answer (skip history/RAG/tools)
+- `rag`: force knowledge-enhanced answer
 
 Admin APIs for operations page:
 
@@ -131,3 +145,22 @@ docker exec agenthub-ollama ollama pull qwen2.5:1.5b
 - `src/main/java/com/eureka/agenthub` main Spring Boot app
 - `mcp-skill-server` standalone skill server
 - `docker-compose.yml` local infra
+- `src/main/resources/static/chat.html` chat page
+- `src/main/resources/static/ingest.html` rag ingest page (text + file)
+- `src/main/resources/static/rag.html` rag management page
+- `src/main/resources/static/sessions.html` session management page
+
+## OpenCode completion reminder (macOS)
+
+- `scripts/notify.sh`: send a local desktop notification
+- `scripts/run-with-notify.sh`: run any command, then notify success/failure
+
+Examples:
+
+```bash
+scripts/notify.sh "OpenCode" "任务已完成"
+scripts/run-with-notify.sh "mvn test"
+scripts/run-with-notify.sh "docker compose -f docker-compose.api.yml up -d"
+```
+
+If `terminal-notifier` is not installed, the script falls back to `osascript`.

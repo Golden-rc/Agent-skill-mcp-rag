@@ -1,6 +1,7 @@
 package com.eureka.agenthub.controller;
 
 import com.eureka.agenthub.service.RagService;
+import com.eureka.agenthub.service.DocumentExtractService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -25,6 +26,9 @@ class IngestControllerTest {
 
     @MockBean
     private RagService ragService;
+
+    @MockBean
+    private DocumentExtractService documentExtractService;
 
     @Test
     void shouldIngestTextSuccessfully() throws Exception {

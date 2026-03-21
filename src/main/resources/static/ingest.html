@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RAG Ingest</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/common.css">
+</head>
+<body>
+<main class="wrap">
+  <section class="hero">
+    <h1>RAG Ingest</h1>
+    <p>支持文本写入与文件文档写入（txt/pdf/doc/docx/md 等）。</p>
+  </section>
+
+  <nav class="nav">
+    <a href="/">首页</a>
+    <a href="/chat.html">Chat</a>
+    <a href="/rag.html">RAG 管理</a>
+    <a href="/sessions.html">Session 管理</a>
+  </nav>
+
+  <section class="grid">
+    <article class="card">
+      <h2>文本写入</h2>
+      <div class="row">
+        <label for="textSource">Source</label>
+        <input id="textSource" value="internship-guide">
+      </div>
+      <div class="row">
+        <label for="textContent">Text</label>
+        <textarea id="textContent">AI工程师实习重点包括Agent架构、RAG系统搭建、工具链封装、记忆管理与安全合规优化。</textarea>
+      </div>
+      <button id="ingestTextBtn">写入文本</button>
+      <div id="textStatus" class="status"></div>
+      <div id="textOutput" class="output">等待写入...</div>
+    </article>
+
+    <article class="card">
+      <h2>文件写入</h2>
+      <div class="row">
+        <label for="fileSource">Source（可选）</label>
+        <input id="fileSource" placeholder="留空则使用文件名">
+      </div>
+      <div class="row">
+        <label for="fileInput">File</label>
+        <input id="fileInput" type="file" accept=".txt,.md,.pdf,.doc,.docx,.rtf,.html,.csv">
+      </div>
+      <button id="ingestFileBtn">上传文件并写入</button>
+      <div id="fileStatus" class="status"></div>
+      <div id="fileOutput" class="output">等待上传...</div>
+    </article>
+  </section>
+</main>
+
+<script src="/common.js"></script>
+<script>
+  const ingestTextBtn = document.getElementById("ingestTextBtn");
+  const ingestFileBtn = document.getElementById("ingestFileBtn");
+
+  const textStatus = document.getElementById("textStatus");
+  const textOutput = document.getElementById("textOutput");
+  const fileStatus = document.getElementById("fileStatus");
+  const fileOutput = document.getElementById("fileOutput");
+
+  ingestTextBtn.addEventListener("click", async () => {
+    try {
+      setStatus(textStatus, "写入中...");
+      const payload = {
+        source: document.getElementById("textSource").value.trim(),
+        text: document.getElementById("textContent").value.trim()
+      };
+      const data = await api("/rag/ingest", { method: "POST", body: JSON.stringify(payload) });
+      setStatus(textStatus, "写入成功", "ok");
+      textOutput.textContent = JSON.stringify(data, null, 2);
+    } catch (e) {
+      setStatus(textStatus, e.message, "error");
+    }
+  });
+
+  ingestFileBtn.addEventListener("click", async () => {
+    try {
+      const file = document.getElementById("fileInput").files[0];
+      if (!file) {
+        setStatus(fileStatus, "请先选择文件", "error");
+        return;
+      }
+
+      setStatus(fileStatus, "上传中...");
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const source = document.getElementById("fileSource").value.trim();
+      if (source) {
+        formData.append("source", source);
+      }
+
+      const res = await fetch("/rag/ingest/file", {
+        method: "POST",
+        body: formData
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+
+      setStatus(fileStatus, "文件写入成功", "ok");
+      fileOutput.textContent = JSON.stringify(data, null, 2);
+    } catch (e) {
+      setStatus(fileStatus, e.message, "error");
+    }
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,502 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chat Console</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/common.css">
+  <style>
+    .chat-layout {
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      gap: 14px;
+      align-items: start;
+    }
+
+    .sidebar {
+      display: grid;
+      gap: 10px;
+      max-height: 78vh;
+    }
+
+    .session-list {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: rgba(7, 11, 19, 0.72);
+      overflow: auto;
+      min-height: 300px;
+      max-height: 52vh;
+      padding: 8px;
+      display: grid;
+      gap: 6px;
+      align-content: start;
+    }
+
+    .session-item {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--text);
+      text-align: left;
+      padding: 8px 9px;
+      cursor: pointer;
+      display: grid;
+      gap: 2px;
+    }
+
+    .session-item.active {
+      background: rgba(54, 209, 183, 0.2);
+      border-color: rgba(54, 209, 183, 0.55);
+    }
+
+    .session-id {
+      font-size: 0.84rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .session-meta {
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
+
+    .chat-pane {
+      min-height: 76vh;
+      display: grid;
+      grid-template-rows: auto auto 1fr auto;
+      gap: 10px;
+    }
+
+    .timeline {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: rgba(7, 11, 19, 0.72);
+      padding: 12px;
+      overflow: auto;
+      min-height: 380px;
+      max-height: 56vh;
+      display: grid;
+      gap: 10px;
+      align-content: start;
+    }
+
+    .msg {
+      max-width: 86%;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 9px 10px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      line-height: 1.45;
+      font-size: .92rem;
+      animation: rise .2s ease-out;
+    }
+
+    .msg.user {
+      justify-self: end;
+      background: rgba(54, 209, 183, 0.17);
+    }
+
+    .msg.assistant {
+      justify-self: start;
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    .typing::after {
+      content: "▋";
+      margin-left: 2px;
+      animation: blink 1s steps(2, start) infinite;
+      color: var(--accent);
+    }
+
+    .composer {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      align-items: end;
+    }
+
+    .composer textarea {
+      min-height: 88px;
+    }
+
+    .meta {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 9px;
+      background: rgba(255, 255, 255, 0.04);
+      font-size: .82rem;
+      color: var(--muted);
+      white-space: pre-wrap;
+    }
+
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes blink {
+      50% { opacity: 0; }
+    }
+
+    @media (max-width: 980px) {
+      .chat-layout {
+        grid-template-columns: 1fr;
+      }
+      .timeline {
+        max-height: 52vh;
+      }
+      .sidebar {
+        max-height: none;
+      }
+    }
+  </style>
+</head>
+<body>
+<main class="wrap">
+  <section class="hero">
+    <h1>Chat Console</h1>
+    <p>类似 ChatGPT 的会话切换体验，点击左侧会话会刷新右侧对话历史。</p>
+  </section>
+
+  <nav class="nav">
+    <a href="/">首页</a>
+    <a href="/ingest.html">RAG Ingest</a>
+    <a href="/rag.html">RAG 管理</a>
+    <a href="/sessions.html">Session 管理</a>
+  </nav>
+
+  <section class="chat-layout">
+    <article class="card sidebar">
+      <h2>会话列表</h2>
+
+      <div class="row inline">
+        <div>
+          <label for="sessionQuery">检索</label>
+          <input id="sessionQuery" placeholder="按 sessionId 模糊查询">
+        </div>
+        <div>
+          <label for="sessionLimit">每页</label>
+          <select id="sessionLimit">
+            <option value="5">5</option>
+            <option value="10" selected>10</option>
+            <option value="20">20</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button id="newSessionBtn">新建会话</button>
+        <button id="refreshSessionBtn" class="secondary">刷新</button>
+      </div>
+
+      <div class="actions">
+        <button id="prevSessionBtn" class="secondary">上一页</button>
+        <button id="nextSessionBtn" class="secondary">下一页</button>
+      </div>
+      <div id="sessionPageInfo" class="small">第 1 页</div>
+
+      <div id="sessionList" class="session-list"></div>
+    </article>
+
+    <article class="card chat-pane">
+      <div class="row inline" style="margin-bottom:0;">
+        <div>
+          <label for="sessionId">Session ID</label>
+          <input id="sessionId" value="demo-ui-1">
+        </div>
+        <div>
+          <label for="provider">Provider</label>
+          <select id="provider">
+            <option value="auto">auto</option>
+            <option value="openai">openai</option>
+            <option value="ollama">ollama</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="row inline" style="margin-bottom:0;">
+        <div>
+          <label for="mode">回答模式</label>
+          <select id="mode">
+            <option value="auto">auto（智能）</option>
+            <option value="direct">严格直答</option>
+            <option value="rag">知识库增强</option>
+          </select>
+        </div>
+        <div class="small" style="display:flex;align-items:end;">
+          `严格直答` 会跳过历史/RAG/工具；`知识库增强` 会优先使用知识库上下文。
+        </div>
+      </div>
+
+      <div id="chatStatus" class="status"></div>
+      <div id="chatKpi" class="kpi"></div>
+
+      <div id="timeline" class="timeline">
+        <div class="msg assistant">你好，我是 Agent Hub。点击左侧会话可切换历史，或新建会话开始聊天。</div>
+      </div>
+
+      <div class="composer">
+        <div class="row" style="margin-bottom:0;">
+          <label for="message">Message</label>
+          <textarea id="message">请基于知识库给我一个实习项目分周计划，并列出待办</textarea>
+        </div>
+        <button id="chatBtn">发送消息</button>
+      </div>
+
+      <div id="chatMeta" class="meta">等待响应...</div>
+    </article>
+  </section>
+</main>
+
+<script src="/common.js"></script>
+<script>
+  const chatBtn = document.getElementById("chatBtn");
+  const sessionIdInput = document.getElementById("sessionId");
+  const providerSelect = document.getElementById("provider");
+  const modeSelect = document.getElementById("mode");
+  const messageInput = document.getElementById("message");
+
+  const chatStatus = document.getElementById("chatStatus");
+  const chatKpi = document.getElementById("chatKpi");
+  const chatMeta = document.getElementById("chatMeta");
+  const timeline = document.getElementById("timeline");
+
+  const sessionList = document.getElementById("sessionList");
+  const sessionPageInfo = document.getElementById("sessionPageInfo");
+  const sessionQuery = document.getElementById("sessionQuery");
+  const sessionLimit = document.getElementById("sessionLimit");
+  const refreshSessionBtn = document.getElementById("refreshSessionBtn");
+  const prevSessionBtn = document.getElementById("prevSessionBtn");
+  const nextSessionBtn = document.getElementById("nextSessionBtn");
+  const newSessionBtn = document.getElementById("newSessionBtn");
+
+  let isSending = false;
+  let sessionOffset = 0;
+  let sessionTotal = 0;
+  let activeSessionId = sessionIdInput.value.trim();
+
+  function appendMessage(role, initialText = "") {
+    const el = document.createElement("div");
+    el.className = `msg ${role}`;
+    el.textContent = initialText;
+    timeline.appendChild(el);
+    timeline.scrollTop = timeline.scrollHeight;
+    return el;
+  }
+
+  function clearTimeline() {
+    timeline.innerHTML = "";
+  }
+
+  function renderHistory(history) {
+    clearTimeline();
+    if (!Array.isArray(history) || history.length === 0) {
+      appendMessage("assistant", "当前会话暂无历史，你可以直接开始提问。");
+      return;
+    }
+
+    history.forEach((item) => {
+      const role = item.role === "user" ? "user" : "assistant";
+      appendMessage(role, item.content || "");
+    });
+  }
+
+  async function typeText(el, text, speed = 16) {
+    el.classList.add("typing");
+    el.textContent = "";
+    for (let i = 0; i < text.length; i += 1) {
+      el.textContent += text[i];
+      if (i % 2 === 0) timeline.scrollTop = timeline.scrollHeight;
+      await new Promise((resolve) => setTimeout(resolve, speed));
+    }
+    el.classList.remove("typing");
+    timeline.scrollTop = timeline.scrollHeight;
+  }
+
+  async function loadSessionHistory(sessionId) {
+    const data = await api(`/admin/sessions/${encodeURIComponent(sessionId)}`);
+    renderHistory(data);
+  }
+
+  async function switchSession(sessionId) {
+    if (!sessionId) return;
+    activeSessionId = sessionId;
+    sessionIdInput.value = sessionId;
+    setStatus(chatStatus, `已切换会话: ${sessionId}`, "ok");
+    await loadSessionHistory(sessionId);
+    await loadSessionList();
+  }
+
+  function renderSessionList(rows) {
+    if (!rows.length) {
+      sessionList.innerHTML = `<div class="small">暂无会话，点击“新建会话”开始。</div>`;
+      return;
+    }
+
+    sessionList.innerHTML = rows.map((s) => {
+      const activeCls = s.sessionId === activeSessionId ? "active" : "";
+      return `
+        <button class="session-item ${activeCls}" data-session="${encodeURIComponent(s.sessionId)}">
+          <div class="session-id">${esc(s.sessionId)}</div>
+          <div class="session-meta">消息 ${s.messageCount} 条 · TTL ${s.ttlSeconds}s</div>
+        </button>
+      `;
+    }).join("");
+  }
+
+  async function loadSessionList() {
+    const limit = Number(sessionLimit.value || 10);
+    const query = sessionQuery.value.trim();
+    const params = new URLSearchParams({
+      limit: String(limit),
+      offset: String(sessionOffset),
+      query
+    });
+    const res = await fetch(`/admin/sessions?${params.toString()}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+
+    sessionTotal = Number(res.headers.get("X-Total-Count") || data.length);
+    renderSessionList(data);
+
+    const page = Math.floor(sessionOffset / limit) + 1;
+    const pages = Math.max(1, Math.ceil(sessionTotal / limit));
+    sessionPageInfo.textContent = `第 ${page} / ${pages} 页，共 ${sessionTotal} 条`;
+    prevSessionBtn.disabled = sessionOffset <= 0;
+    nextSessionBtn.disabled = sessionOffset + limit >= sessionTotal;
+  }
+
+  chatBtn.addEventListener("click", async () => {
+    if (isSending) return;
+    try {
+      isSending = true;
+      setStatus(chatStatus, "请求中...");
+      chatKpi.innerHTML = "";
+
+      const userInput = messageInput.value.trim();
+      if (!userInput) {
+        setStatus(chatStatus, "请输入消息", "error");
+        return;
+      }
+
+      const sessionId = sessionIdInput.value.trim();
+      activeSessionId = sessionId;
+      appendMessage("user", userInput);
+      const assistantEl = appendMessage("assistant", "思考中...");
+
+      const payload = {
+        sessionId,
+        provider: providerSelect.value,
+        mode: modeSelect.value,
+        message: userInput
+      };
+
+      const data = await api("/chat", { method: "POST", body: JSON.stringify(payload) });
+      chatKpi.innerHTML =
+        `<span class="tag">provider: ${esc(data.providerUsed || "-")}</span>` +
+        `<span class="tag">tools: ${esc((data.toolCalls || []).join(", ") || "none")}</span>` +
+        `<span class="tag">citations: ${(data.citations || []).length}</span>`;
+
+      let out = data.answer || "";
+      if ((data.citations || []).length > 0) {
+        out += "\n\n---\n引用:\n";
+        (data.citations || []).forEach((c, idx) => {
+          out += `${idx + 1}. [${c.source}] score=${(c.score || 0).toFixed(4)}\n${c.content}\n`;
+        });
+      }
+      await typeText(assistantEl, out, 15);
+
+      chatMeta.textContent = JSON.stringify({
+        provider: data.providerUsed,
+        toolCalls: data.toolCalls || [],
+        citations: (data.citations || []).length,
+        mode: modeSelect.value,
+        sessionId
+      }, null, 2);
+
+      setStatus(chatStatus, "请求成功", "ok");
+      await loadSessionList();
+    } catch (e) {
+      setStatus(chatStatus, e.message, "error");
+      appendMessage("assistant", "请求失败，请检查 API Key / 服务状态。\n" + e.message);
+    } finally {
+      isSending = false;
+    }
+  });
+
+  messageInput.addEventListener("keydown", (event) => {
+    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+      event.preventDefault();
+      chatBtn.click();
+    }
+  });
+
+  sessionList.addEventListener("click", async (event) => {
+    const btn = event.target.closest(".session-item");
+    if (!btn) return;
+    if (isSending) {
+      setStatus(chatStatus, "当前正在生成回复，请稍后切换会话", "error");
+      return;
+    }
+    await switchSession(decodeURIComponent(btn.dataset.session || ""));
+  });
+
+  newSessionBtn.addEventListener("click", async () => {
+    if (isSending) return;
+    const newId = `session-${Date.now()}`;
+    activeSessionId = newId;
+    sessionIdInput.value = newId;
+    clearTimeline();
+    appendMessage("assistant", "新会话已创建，开始提问吧。\n(提示：消息发送后该会话会自动进入列表)");
+    setStatus(chatStatus, `已创建新会话: ${newId}`, "ok");
+    await loadSessionList();
+  });
+
+  refreshSessionBtn.addEventListener("click", async () => {
+    sessionOffset = 0;
+    await loadSessionList();
+  });
+
+  prevSessionBtn.addEventListener("click", async () => {
+    const limit = Number(sessionLimit.value || 10);
+    sessionOffset = Math.max(0, sessionOffset - limit);
+    await loadSessionList();
+  });
+
+  nextSessionBtn.addEventListener("click", async () => {
+    const limit = Number(sessionLimit.value || 10);
+    if (sessionOffset + limit < sessionTotal) {
+      sessionOffset += limit;
+      await loadSessionList();
+    }
+  });
+
+  sessionLimit.addEventListener("change", async () => {
+    sessionOffset = 0;
+    await loadSessionList();
+  });
+
+  sessionQuery.addEventListener("keydown", async (event) => {
+    if (event.key === "Enter") {
+      sessionOffset = 0;
+      await loadSessionList();
+    }
+  });
+
+  (async function init() {
+    try {
+      await loadSessionList();
+      await switchSession(activeSessionId);
+    } catch (e) {
+      setStatus(chatStatus, e.message, "error");
+    }
+  })();
+</script>
+</body>
+</html>

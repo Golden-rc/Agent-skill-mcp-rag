@@ -41,8 +41,20 @@ public class AdminController {
      */
     public ResponseEntity<List<RagService.RagChunkRow>> listChunks(
             @RequestParam(required = false) String source,
-            @RequestParam(defaultValue = "50") int limit) {
-        return ResponseEntity.ok(ragService.listChunks(source, limit));
+            @RequestParam(defaultValue = "50") int limit,
+            @RequestParam(defaultValue = "0") int offset) {
+        List<RagService.RagChunkRow> rows = ragService.listChunks(source, limit, offset);
+        long total = ragService.countChunks(source);
+        return ResponseEntity.ok()
+                .header("X-Total-Count", String.valueOf(total))
+                .header("X-Limit", String.valueOf(limit))
+                .header("X-Offset", String.valueOf(offset))
+                .body(rows);
+    }
+
+    @GetMapping("/rag/sources")
+    public ResponseEntity<List<String>> listSources() {
+        return ResponseEntity.ok(ragService.listSources());
     }
 
     @PutMapping("/rag/chunks/{id}")
@@ -71,11 +83,18 @@ public class AdminController {
     }
 
     @GetMapping("/sessions")
-    /**
-     * 列出当前 Redis 会话键和消息统计。
-     */
-    public ResponseEntity<List<MemoryService.SessionInfo>> listSessions() {
-        return ResponseEntity.ok(memoryService.listSessions());
+    public ResponseEntity<List<MemoryService.SessionInfo>> listSessions(
+            @RequestParam(defaultValue = "") String query,
+            @RequestParam(defaultValue = "all") String state,
+            @RequestParam(defaultValue = "50") int limit,
+            @RequestParam(defaultValue = "0") int offset) {
+        List<MemoryService.SessionInfo> rows = memoryService.listSessions(query, state, limit, offset);
+        long total = memoryService.countSessions(query, state);
+        return ResponseEntity.ok()
+                .header("X-Total-Count", String.valueOf(total))
+                .header("X-Limit", String.valueOf(limit))
+                .header("X-Offset", String.valueOf(offset))
+                .body(rows);
     }
 
     @GetMapping("/sessions/{sessionId}")

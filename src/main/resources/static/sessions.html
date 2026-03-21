@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Session 管理</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/common.css">
+</head>
+<body>
+<main class="wrap">
+  <section class="hero">
+    <h1>Session 管理</h1>
+    <p>查看 Redis 会话列表、历史消息和清理会话。</p>
+  </section>
+
+  <nav class="nav">
+    <a href="/">首页</a>
+    <a href="/chat.html">Chat</a>
+    <a href="/ingest.html">RAG Ingest</a>
+    <a href="/rag.html">RAG 管理</a>
+  </nav>
+
+  <section class="grid">
+    <article class="card wide">
+      <h2>会话列表</h2>
+      <div class="row inline-3">
+        <div>
+          <label for="sessionPick">Session</label>
+          <select id="sessionPick"></select>
+        </div>
+        <div>
+          <label for="sessionQuery">检索</label>
+          <input id="sessionQuery" placeholder="按 sessionId 模糊搜索">
+        </div>
+        <div>
+          <label for="sessionState">状态筛选</label>
+          <select id="sessionState">
+            <option value="all">全部</option>
+            <option value="active">active (ttl>0)</option>
+            <option value="expired">expired (ttl<=0)</option>
+          </select>
+        </div>
+      </div>
+      <div class="row inline-3">
+        <div>
+          <label for="sessionLimit">每页</label>
+          <select id="sessionLimit">
+            <option value="10" selected>10</option>
+            <option value="20">20</option>
+            <option value="50">50</option>
+          </select>
+        </div>
+        <div style="display:flex; align-items:end; gap:8px;">
+          <button id="refreshSessionBtn" class="secondary">刷新会话</button>
+        </div>
+        <div style="display:flex; align-items:end; gap:8px;">
+          <button id="clearSessionBtn" class="danger">清空当前会话</button>
+        </div>
+      </div>
+      <div class="actions" style="margin-top:4px;">
+        <button id="prevSessionBtn" class="secondary">上一页</button>
+        <button id="nextSessionBtn" class="secondary">下一页</button>
+        <span id="sessionPageInfo" class="small">第 1 页</span>
+      </div>
+      <div id="sessionStatus" class="status"></div>
+      <table>
+        <thead>
+        <tr>
+          <th>Session ID</th>
+          <th>Message Count</th>
+          <th>TTL(s)</th>
+        </tr>
+        </thead>
+        <tbody id="sessionRows"></tbody>
+      </table>
+      <div id="sessionHistory" class="output">选择会话后展示历史消息...</div>
+    </article>
+  </section>
+</main>
+
+<script src="/common.js"></script>
+<script>
+  const sessionStatus = document.getElementById("sessionStatus");
+  const sessionRows = document.getElementById("sessionRows");
+  const sessionHistory = document.getElementById("sessionHistory");
+  const sessionPick = document.getElementById("sessionPick");
+  const sessionQuery = document.getElementById("sessionQuery");
+  const sessionState = document.getElementById("sessionState");
+  const sessionLimit = document.getElementById("sessionLimit");
+  const refreshSessionBtn = document.getElementById("refreshSessionBtn");
+  const clearSessionBtn = document.getElementById("clearSessionBtn");
+  const prevSessionBtn = document.getElementById("prevSessionBtn");
+  const nextSessionBtn = document.getElementById("nextSessionBtn");
+  const sessionPageInfo = document.getElementById("sessionPageInfo");
+
+  let sessionOffset = 0;
+  let sessionTotal = 0;
+
+  async function loadSessionHistory(sessionId) {
+    if (!sessionId) {
+      sessionHistory.textContent = "请选择会话";
+      return;
+    }
+    try {
+      const history = await api(`/admin/sessions/${encodeURIComponent(sessionId)}`);
+      sessionHistory.textContent = history.length ? JSON.stringify(history, null, 2) : "该会话暂无历史";
+    } catch (e) {
+      sessionHistory.textContent = e.message;
+    }
+  }
+
+  async function loadSessions() {
+    try {
+      setStatus(sessionStatus, "加载会话中...");
+      const params = new URLSearchParams({
+        query: sessionQuery.value.trim(),
+        state: sessionState.value,
+        limit: sessionLimit.value,
+        offset: String(sessionOffset)
+      });
+      const res = await fetch(`/admin/sessions?${params.toString()}`);
+      const sessions = await res.json();
+      if (!res.ok) throw new Error(sessions.error || `HTTP ${res.status}`);
+      sessionTotal = Number(res.headers.get("X-Total-Count") || sessions.length);
+
+      sessionRows.innerHTML = sessions.map((s) => `
+        <tr>
+          <td>${esc(s.sessionId)}</td>
+          <td>${s.messageCount}</td>
+          <td>${s.ttlSeconds}</td>
+        </tr>
+      `).join("");
+
+      const current = sessionPick.value;
+      sessionPick.innerHTML = sessions.map((s) => `<option value="${esc(s.sessionId)}">${esc(s.sessionId)}</option>`).join("");
+      if (current && sessions.some((s) => s.sessionId === current)) {
+        sessionPick.value = current;
+      }
+
+      if (sessionPick.value) {
+        await loadSessionHistory(sessionPick.value);
+      } else {
+        sessionHistory.textContent = "暂无会话数据";
+      }
+
+      const limit = Number(sessionLimit.value || 10);
+      const page = Math.floor(sessionOffset / limit) + 1;
+      const pages = Math.max(1, Math.ceil(sessionTotal / limit));
+      sessionPageInfo.textContent = `第 ${page} / ${pages} 页，共 ${sessionTotal} 条`;
+      prevSessionBtn.disabled = sessionOffset <= 0;
+      nextSessionBtn.disabled = sessionOffset + limit >= sessionTotal;
+
+      setStatus(sessionStatus, `当前页 ${sessions.length} 条`, "ok");
+    } catch (e) {
+      setStatus(sessionStatus, e.message, "error");
+    }
+  }
+
+  refreshSessionBtn.addEventListener("click", async () => {
+    sessionOffset = 0;
+    await loadSessions();
+  });
+  sessionPick.addEventListener("change", () => loadSessionHistory(sessionPick.value));
+
+  sessionState.addEventListener("change", async () => {
+    sessionOffset = 0;
+    await loadSessions();
+  });
+
+  sessionLimit.addEventListener("change", async () => {
+    sessionOffset = 0;
+    await loadSessions();
+  });
+
+  sessionQuery.addEventListener("keydown", async (event) => {
+    if (event.key === "Enter") {
+      sessionOffset = 0;
+      await loadSessions();
+    }
+  });
+
+  prevSessionBtn.addEventListener("click", async () => {
+    const limit = Number(sessionLimit.value || 10);
+    sessionOffset = Math.max(0, sessionOffset - limit);
+    await loadSessions();
+  });
+
+  nextSessionBtn.addEventListener("click", async () => {
+    const limit = Number(sessionLimit.value || 10);
+    if (sessionOffset + limit < sessionTotal) {
+      sessionOffset += limit;
+      await loadSessions();
+    }
+  });
+
+  clearSessionBtn.addEventListener("click", async () => {
+    const sessionId = sessionPick.value;
+    if (!sessionId) {
+      setStatus(sessionStatus, "没有可清理的会话", "error");
+      return;
+    }
+    if (!confirm(`确认清空会话 ${sessionId} ?`)) return;
+    try {
+      await api(`/admin/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
+      setStatus(sessionStatus, `会话 ${sessionId} 已清理`, "ok");
+      await loadSessions();
+    } catch (e) {
+      setStatus(sessionStatus, e.message, "error");
+    }
+  });
+
+  loadSessions();
+</script>
+</body>
+</html>

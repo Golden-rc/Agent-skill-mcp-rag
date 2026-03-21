@@ -7,8 +7,10 @@ import com.eureka.agenthub.model.RagHit;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+import java.util.regex.Pattern;
 
 @Service
 /**
@@ -17,6 +19,8 @@ import java.util.Locale;
  * 主流程：模型路由 -> 读取会话记忆 -> RAG 检索 -> 可选工具调用 -> LLM 生成 -> 写回记忆。
  */
 public class ChatService {
+
+    private static final Pattern PURE_MATH_PATTERN = Pattern.compile("^[0-9\\s+\\-*/().=]+$");
 
     private final ProviderRouter providerRouter;
     private final MemoryService memoryService;
@@ -39,31 +43,65 @@ public class ChatService {
     public ChatResponse chat(ChatRequest request) {
         // 1) 选择模型提供方。
         String provider = providerRouter.pickProvider(request.getProvider());
-        // 2) 取会话历史，用于多轮上下文。
-        List<ChatMessage> history = memoryService.loadHistory(request.getSessionId());
-        // 3) 检索知识库，提供引用上下文。
-        List<RagHit> hits = ragService.retrieve(request.getMessage(), 3);
+        String userMessage = request.getMessage();
+        String mode = normalizeMode(request.getMode());
+        boolean simpleQuestion = isSimpleQuestion(userMessage);
+        boolean directMode = "direct".equals(mode) || ("auto".equals(mode) && simpleQuestion);
+        boolean ragMode = "rag".equals(mode);
+
+        // 2) 严格直答模式不带历史，避免被旧上下文污染。
+        List<ChatMessage> history = directMode ? Collections.emptyList() : memoryService.loadHistory(request.getSessionId());
+
+        // 3) 严格直答跳过 RAG；知识库增强始终启用 RAG；auto 由 simpleQuestion 决定。
+        List<RagHit> hits = (directMode && !ragMode)
+                ? Collections.emptyList()
+                : ragService.retrieve(userMessage, 3);
+
         List<String> toolCalls = new ArrayList<>();
 
         // 4) 简单意图路由，按关键词触发 MCP 工具。
-        String toolResult = routeToolIfNeeded(request.getMessage(), toolCalls);
+        String toolResult = directMode ? "" : routeToolIfNeeded(userMessage, toolCalls);
 
         // 5) 组装最终 prompt。
         List<ChatMessage> prompt = new ArrayList<>();
         prompt.add(new ChatMessage("system",
                 "You are an enterprise AI assistant. Answer in Chinese when user uses Chinese. " +
-                        "If retrieval context exists, cite source names in the answer."));
+                        "If retrieval context exists, cite source names in the answer. " +
+                        "For simple math or short factual questions, answer directly and do not force RAG context."));
         prompt.addAll(history);
-        prompt.add(new ChatMessage("user", buildUserPrompt(request.getMessage(), hits, toolResult)));
+        prompt.add(new ChatMessage("user", buildUserPrompt(userMessage, hits, toolResult)));
 
         // 6) 调用模型生成回答。
         String answer = modelClientService.chat(provider, prompt);
 
         // 7) 写回会话记忆。
-        memoryService.append(request.getSessionId(), new ChatMessage("user", request.getMessage()));
+        memoryService.append(request.getSessionId(), new ChatMessage("user", userMessage));
         memoryService.append(request.getSessionId(), new ChatMessage("assistant", answer));
 
         return new ChatResponse(answer, provider, hits, toolCalls);
+    }
+
+    private String normalizeMode(String requestMode) {
+        String mode = requestMode == null ? "auto" : requestMode.trim().toLowerCase(Locale.ROOT);
+        return switch (mode) {
+            case "auto", "direct", "rag" -> mode;
+            default -> throw new IllegalArgumentException("unsupported mode: " + requestMode);
+        };
+    }
+
+    private boolean isSimpleQuestion(String message) {
+        if (message == null) {
+            return false;
+        }
+        String trimmed = message.trim();
+        if (trimmed.isEmpty()) {
+            return false;
+        }
+        if (PURE_MATH_PATTERN.matcher(trimmed).matches()) {
+            return true;
+        }
+        String lower = trimmed.toLowerCase(Locale.ROOT);
+        return trimmed.length() <= 20 && (lower.equals("1+1") || lower.equals("2+2") || lower.equals("123"));
     }
 
     private String routeToolIfNeeded(String message, List<String> toolCalls) {

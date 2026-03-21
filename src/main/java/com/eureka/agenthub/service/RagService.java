@@ -84,11 +84,16 @@ public class RagService {
     }
 
     public List<RagChunkRow> listChunks(String source, int limit) {
+        return listChunks(source, limit, 0);
+    }
+
+    public List<RagChunkRow> listChunks(String source, int limit, int offset) {
         // 限制查询上限，避免前端一次拉取过大数据。
         int safeLimit = Math.max(1, Math.min(limit, 200));
+        int safeOffset = Math.max(0, offset);
         if (StringUtils.hasText(source)) {
             return jdbcTemplate.query(
-                    "SELECT id, source, content, created_at FROM rag_chunks WHERE source = ? ORDER BY id DESC LIMIT ?",
+                    "SELECT id, source, content, created_at FROM rag_chunks WHERE source = ? ORDER BY id DESC LIMIT ? OFFSET ?",
                     (rs, rowNum) -> new RagChunkRow(
                             rs.getLong("id"),
                             rs.getString("source"),
@@ -96,19 +101,37 @@ public class RagService {
                             Objects.toString(rs.getTimestamp("created_at"), "")
                     ),
                     source,
-                    safeLimit
+                    safeLimit,
+                    safeOffset
             );
         }
 
         return jdbcTemplate.query(
-                "SELECT id, source, content, created_at FROM rag_chunks ORDER BY id DESC LIMIT ?",
+                "SELECT id, source, content, created_at FROM rag_chunks ORDER BY id DESC LIMIT ? OFFSET ?",
                 (rs, rowNum) -> new RagChunkRow(
                         rs.getLong("id"),
                         rs.getString("source"),
                         rs.getString("content"),
                         Objects.toString(rs.getTimestamp("created_at"), "")
                 ),
-                safeLimit
+                safeLimit,
+                safeOffset
+        );
+    }
+
+    public long countChunks(String source) {
+        if (StringUtils.hasText(source)) {
+            Long total = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM rag_chunks WHERE source = ?", Long.class, source);
+            return total == null ? 0 : total;
+        }
+        Long total = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM rag_chunks", Long.class);
+        return total == null ? 0 : total;
+    }
+
+    public List<String> listSources() {
+        return jdbcTemplate.query(
+                "SELECT DISTINCT source FROM rag_chunks ORDER BY source ASC",
+                (rs, rowNum) -> rs.getString("source")
         );
     }
 

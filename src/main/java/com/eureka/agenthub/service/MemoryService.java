@@ -70,21 +70,76 @@ public class MemoryService {
     }
 
     public List<SessionInfo> listSessions() {
+        return listSessions("", "all", 50, 0);
+    }
+
+    public List<SessionInfo> listSessions(String query, String state, int limit, int offset) {
         // 扫描会话键用于后台运维页面。
         Set<String> keys = redisTemplate.keys("chat:mem:*");
         if (keys == null || keys.isEmpty()) {
             return Collections.emptyList();
         }
 
+        String safeQuery = query == null ? "" : query.trim().toLowerCase();
+        String safeState = state == null ? "all" : state.trim().toLowerCase();
+        int safeLimit = Math.max(1, Math.min(limit, 200));
+        int safeOffset = Math.max(0, offset);
+
         List<SessionInfo> sessions = new ArrayList<>();
         for (String fullKey : keys) {
             String sessionId = fullKey.replaceFirst("^chat:mem:", "");
+            if (!safeQuery.isEmpty() && !sessionId.toLowerCase().contains(safeQuery)) {
+                continue;
+            }
             Long size = redisTemplate.opsForList().size(fullKey);
             Long ttl = redisTemplate.getExpire(fullKey);
-            sessions.add(new SessionInfo(sessionId, size == null ? 0 : size.intValue(), ttl == null ? -1 : ttl));
+            long ttlValue = ttl == null ? -1 : ttl;
+
+            if ("active".equals(safeState) && ttlValue <= 0) {
+                continue;
+            }
+            if ("expired".equals(safeState) && ttlValue > 0) {
+                continue;
+            }
+
+            sessions.add(new SessionInfo(sessionId, size == null ? 0 : size.intValue(), ttlValue));
         }
         sessions.sort((a, b) -> Integer.compare(b.messageCount(), a.messageCount()));
-        return sessions;
+
+        if (safeOffset >= sessions.size()) {
+            return Collections.emptyList();
+        }
+
+        int toIndex = Math.min(sessions.size(), safeOffset + safeLimit);
+        return new ArrayList<>(sessions.subList(safeOffset, toIndex));
+    }
+
+    public long countSessions(String query, String state) {
+        Set<String> keys = redisTemplate.keys("chat:mem:*");
+        if (keys == null || keys.isEmpty()) {
+            return 0;
+        }
+
+        String safeQuery = query == null ? "" : query.trim().toLowerCase();
+        String safeState = state == null ? "all" : state.trim().toLowerCase();
+
+        long count = 0;
+        for (String fullKey : keys) {
+            String sessionId = fullKey.replaceFirst("^chat:mem:", "");
+            if (!safeQuery.isEmpty() && !sessionId.toLowerCase().contains(safeQuery)) {
+                continue;
+            }
+            Long ttl = redisTemplate.getExpire(fullKey);
+            long ttlValue = ttl == null ? -1 : ttl;
+            if ("active".equals(safeState) && ttlValue <= 0) {
+                continue;
+            }
+            if ("expired".equals(safeState) && ttlValue > 0) {
+                continue;
+            }
+            count++;
+        }
+        return count;
     }
 
     public int clearSession(String sessionId) {

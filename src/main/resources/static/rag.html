@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RAG 管理</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/common.css">
+</head>
+<body>
+<main class="wrap">
+  <section class="hero">
+    <h1>RAG 数据管理</h1>
+    <p>查看、筛选、编辑、删除 `rag_chunks`。</p>
+  </section>
+
+  <nav class="nav">
+    <a href="/">首页</a>
+    <a href="/chat.html">Chat</a>
+    <a href="/ingest.html">RAG Ingest</a>
+    <a href="/sessions.html">Session 管理</a>
+  </nav>
+
+  <section class="grid">
+    <article class="card wide">
+      <h2>Chunk 列表</h2>
+      <div class="row inline-3">
+        <div>
+          <label for="ragSourceFilter">Source Filter</label>
+          <select id="ragSourceFilter">
+            <option value="">全部</option>
+          </select>
+        </div>
+        <div>
+          <label for="ragLimit">每页</label>
+          <select id="ragLimit">
+            <option value="10">10</option>
+            <option value="20">20</option>
+            <option value="50" selected>50</option>
+            <option value="100">100</option>
+          </select>
+        </div>
+        <div style="display:flex; align-items:end; gap:8px;">
+          <button id="refreshRagBtn" class="secondary">刷新列表</button>
+        </div>
+      </div>
+      <div class="actions" style="margin-top:4px;">
+        <button id="prevRagBtn" class="secondary">上一页</button>
+        <button id="nextRagBtn" class="secondary">下一页</button>
+        <span id="ragPageInfo" class="small">第 1 页</span>
+      </div>
+      <div id="ragManageStatus" class="status"></div>
+      <div class="small">编辑后点击保存，会自动刷新该条记录 embedding。</div>
+      <table>
+        <thead>
+        <tr>
+          <th>ID</th>
+          <th>Source</th>
+          <th>Content</th>
+          <th>Created</th>
+          <th>Actions</th>
+        </tr>
+        </thead>
+        <tbody id="ragRows"></tbody>
+      </table>
+    </article>
+  </section>
+</main>
+
+<script src="/common.js"></script>
+<script>
+  const ragManageStatus = document.getElementById("ragManageStatus");
+  const ragRows = document.getElementById("ragRows");
+  const refreshRagBtn = document.getElementById("refreshRagBtn");
+  const ragSourceFilter = document.getElementById("ragSourceFilter");
+  const ragLimit = document.getElementById("ragLimit");
+  const prevRagBtn = document.getElementById("prevRagBtn");
+  const nextRagBtn = document.getElementById("nextRagBtn");
+  const ragPageInfo = document.getElementById("ragPageInfo");
+
+  let ragOffset = 0;
+  let ragTotal = 0;
+
+  async function loadSources() {
+    const sources = await api("/admin/rag/sources");
+    const current = ragSourceFilter.value;
+    ragSourceFilter.innerHTML = `<option value="">全部</option>` +
+      sources.map((s) => `<option value="${esc(s)}">${esc(s)}</option>`).join("");
+    if (sources.includes(current)) {
+      ragSourceFilter.value = current;
+    }
+  }
+
+  async function loadRagChunks() {
+    try {
+      setStatus(ragManageStatus, "加载中...");
+      const source = ragSourceFilter.value.trim();
+      const limit = Number(ragLimit.value || 50);
+      const q = new URLSearchParams();
+      if (source) q.set("source", source);
+      q.set("limit", String(limit));
+      q.set("offset", String(ragOffset));
+      const res = await fetch(`/admin/rag/chunks?${q.toString()}`);
+      const rows = await res.json();
+      if (!res.ok) throw new Error(rows.error || `HTTP ${res.status}`);
+      ragTotal = Number(res.headers.get("X-Total-Count") || rows.length);
+
+      ragRows.innerHTML = rows.map((r) => `
+        <tr>
+          <td>${r.id}</td>
+          <td><input id="src-${r.id}" value="${esc(r.source)}"></td>
+          <td><textarea id="content-${r.id}" style="min-height:68px;">${esc(r.content)}</textarea></td>
+          <td>${esc(r.createdAt)}</td>
+          <td>
+            <div class="actions">
+              <button class="secondary" onclick="saveChunk(${r.id})">保存</button>
+              <button class="danger" onclick="deleteChunk(${r.id})">删除</button>
+            </div>
+          </td>
+        </tr>
+      `).join("");
+
+      const page = Math.floor(ragOffset / limit) + 1;
+      const pages = Math.max(1, Math.ceil(ragTotal / limit));
+      ragPageInfo.textContent = `第 ${page} / ${pages} 页，共 ${ragTotal} 条`;
+      prevRagBtn.disabled = ragOffset <= 0;
+      nextRagBtn.disabled = ragOffset + limit >= ragTotal;
+      setStatus(ragManageStatus, `已加载 ${rows.length} 条`, "ok");
+    } catch (e) {
+      setStatus(ragManageStatus, e.message, "error");
+    }
+  }
+
+  window.saveChunk = async (id) => {
+    try {
+      const payload = {
+        source: document.getElementById(`src-${id}`).value.trim(),
+        content: document.getElementById(`content-${id}`).value.trim()
+      };
+      await api(`/admin/rag/chunks/${id}`, { method: "PUT", body: JSON.stringify(payload) });
+      setStatus(ragManageStatus, `Chunk ${id} 已更新`, "ok");
+      await loadRagChunks();
+    } catch (e) {
+      setStatus(ragManageStatus, e.message, "error");
+    }
+  };
+
+  window.deleteChunk = async (id) => {
+    if (!confirm(`确认删除 chunk ${id} ?`)) return;
+    try {
+      await api(`/admin/rag/chunks/${id}`, { method: "DELETE" });
+      setStatus(ragManageStatus, `Chunk ${id} 已删除`, "ok");
+      await loadRagChunks();
+    } catch (e) {
+      setStatus(ragManageStatus, e.message, "error");
+    }
+  };
+
+  refreshRagBtn.addEventListener("click", async () => {
+    ragOffset = 0;
+    await loadSources();
+    await loadRagChunks();
+  });
+
+  ragSourceFilter.addEventListener("change", async () => {
+    ragOffset = 0;
+    await loadRagChunks();
+  });
+
+  ragLimit.addEventListener("change", async () => {
+    ragOffset = 0;
+    await loadRagChunks();
+  });
+
+  prevRagBtn.addEventListener("click", async () => {
+    const limit = Number(ragLimit.value || 50);
+    ragOffset = Math.max(0, ragOffset - limit);
+    await loadRagChunks();
+  });
+
+  nextRagBtn.addEventListener("click", async () => {
+    const limit = Number(ragLimit.value || 50);
+    if (ragOffset + limit < ragTotal) {
+      ragOffset += limit;
+      await loadRagChunks();
+    }
+  });
+
+  (async function init() {
+    await loadSources();
+    await loadRagChunks();
+  })();
+</script>
+</body>
+</html>
