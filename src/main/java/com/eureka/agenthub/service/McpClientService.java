@@ -46,7 +46,12 @@ public class McpClientService {
         request.put("method", "tools/call");
         request.put("params", params);
 
-        JsonNode response = invokeRpc(request);
+        JsonNode response;
+        try {
+            response = invokeRpc(request);
+        } catch (Exception ignored) {
+            return "";
+        }
 
         JsonNode result = response == null ? null : response.path("result").path("content");
         if (result == null || result.isMissingNode()) {
@@ -72,24 +77,6 @@ public class McpClientService {
         JsonNode response = invokeRpc(request);
         JsonNode tools = response == null ? null : response.path("result").path("tools");
         return asMapList(tools);
-    }
-
-    public Map<String, Object> previewImport(String remoteBaseUrl) {
-        Map<String, Object> request = rpc("registry-import-preview", "registry/tools/import.preview",
-                Map.of("remoteBaseUrl", remoteBaseUrl));
-        JsonNode response = invokeRpc(request);
-        return asMap(response.path("result"));
-    }
-
-    public Map<String, Object> commitImport(String remoteBaseUrl, String alias, List<String> toolNames) {
-        Map<String, Object> request = rpc("registry-import-commit", "registry/tools/import.commit",
-                Map.of(
-                        "remoteBaseUrl", remoteBaseUrl,
-                        "alias", alias,
-                        "toolNames", toolNames == null ? List.of() : toolNames
-                ));
-        JsonNode response = invokeRpc(request);
-        return asMap(response.path("result"));
     }
 
     public Map<String, Object> exportManifest(List<String> toolNames) {
@@ -158,12 +145,18 @@ public class McpClientService {
     }
 
     private JsonNode invokeRpc(Map<String, Object> request) {
-        return restClient.post()
+        JsonNode response = restClient.post()
                 .uri("/mcp")
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(request)
                 .retrieve()
                 .body(JsonNode.class);
+
+        if (response != null && response.has("error")) {
+            String message = response.path("error").path("message").asText("mcp rpc error");
+            throw new IllegalArgumentException(message);
+        }
+        return response;
     }
 
     private Map<String, Object> rpc(String id, String method, Map<String, Object> params) {

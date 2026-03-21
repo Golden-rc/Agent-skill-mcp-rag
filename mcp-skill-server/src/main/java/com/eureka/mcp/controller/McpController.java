@@ -72,26 +72,6 @@ public class McpController {
             )));
         }
 
-        if ("registry/tools/import.preview".equals(method)) {
-            Map<String, Object> params = asMap(request.get("params"));
-            String remoteBaseUrl = String.valueOf(params.getOrDefault("remoteBaseUrl", ""));
-            if (remoteBaseUrl.isBlank()) {
-                return ResponseEntity.ok(error(id, -32602, "remoteBaseUrl is required"));
-            }
-            return ResponseEntity.ok(ok(id, toolRegistry.previewImport(remoteBaseUrl)));
-        }
-
-        if ("registry/tools/import.commit".equals(method)) {
-            Map<String, Object> params = asMap(request.get("params"));
-            String remoteBaseUrl = String.valueOf(params.getOrDefault("remoteBaseUrl", ""));
-            String alias = String.valueOf(params.getOrDefault("alias", "imported"));
-            List<String> toolNames = asStringList(params.get("toolNames"));
-            if (remoteBaseUrl.isBlank()) {
-                return ResponseEntity.ok(error(id, -32602, "remoteBaseUrl is required"));
-            }
-            return ResponseEntity.ok(ok(id, toolRegistry.commitImport(remoteBaseUrl, alias, toolNames)));
-        }
-
         if ("registry/tools/export".equals(method)) {
             Map<String, Object> params = asMap(request.get("params"));
             List<String> toolNames = asStringList(params.get("toolNames"));

@@ -149,7 +149,6 @@ docker exec agenthub-ollama ollama pull qwen2.5:1.5b
 - `src/main/resources/static/ingest.html` rag ingest page (text + file)
 - `src/main/resources/static/rag.html` rag management page
 - `src/main/resources/static/sessions.html` session management page
-- `src/main/resources/static/mcp-tools.html` mcp import/export management page
 
 ## MCP protocol support
 
@@ -163,10 +162,8 @@ This project now follows standard MCP handshake + tools flow:
 
 `tools/call` responses use MCP content blocks (`result.content: [{type:"text", text:"..."}]`).
 
-## MCP tool import/export
+## MCP tool export
 
-- Import preview: `POST /admin/mcp/import/preview`
-- Import commit: `POST /admin/mcp/import/commit`
 - Local tool list: `GET /admin/mcp/tools`
 - Export manifest: `GET /admin/mcp/export`
 

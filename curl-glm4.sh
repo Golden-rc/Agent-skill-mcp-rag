@@ -4,7 +4,7 @@ curl -X POST \
         -H "User-Agent: Mozilla/4.0 (compatible; MSIE 5.0; Windows NT; DigExt)" \
         -d '{
           "model":"glm-4",
-          "stream": "true",
+          "stream": "false",
           "messages": [
               {
                   "role": "user",

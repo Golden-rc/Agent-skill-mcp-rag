@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MCP Tool Hub</title>
+  <title>MCP Export Preview</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
@@ -12,8 +12,8 @@
 <body>
 <main class="wrap">
   <section class="hero">
-    <h1>MCP 工具管理中心</h1>
-    <p>支持从外部 MCP 导入工具到本地，并导出共享给其他人。</p>
+    <h1>MCP 导出预览</h1>
+    <p>仅保留导出功能：查看并下载本地 MCP 工具清单。</p>
   </section>
 
   <nav class="nav">
@@ -26,145 +26,77 @@
 
   <section class="grid">
     <article class="card wide">
-      <h2>导入外部 MCP 工具</h2>
-      <div class="row inline-3">
-        <div>
-          <label for="remoteBaseUrl">Remote MCP Base URL</label>
-          <input id="remoteBaseUrl" placeholder="http://localhost:9000">
-        </div>
-        <div>
-          <label for="alias">本地别名</label>
-          <input id="alias" value="remote">
-        </div>
-        <div style="display:flex; align-items:end; gap:8px;">
-          <button id="previewBtn" class="secondary">预览远端工具</button>
-          <button id="importBtn">导入选中工具</button>
-        </div>
-      </div>
-      <div id="importStatus" class="status"></div>
-      <table>
-        <thead>
-          <tr>
-            <th>选择</th>
-            <th>远端工具名</th>
-            <th>描述</th>
-          </tr>
-        </thead>
-        <tbody id="previewRows"></tbody>
-      </table>
-    </article>
-
-    <article class="card wide">
-      <h2>本地 MCP 工具</h2>
+      <h2>导出本地 MCP 工具清单</h2>
       <div class="actions">
-        <button id="refreshLocalBtn" class="secondary">刷新本地工具</button>
+        <button id="refreshBtn" class="secondary">刷新工具列表</button>
+        <button id="selectAllBtn" class="secondary">全选</button>
+        <button id="clearSelectionBtn" class="secondary">清空勾选</button>
         <button id="exportBtn">导出共享 JSON</button>
       </div>
       <div id="localStatus" class="status"></div>
       <table>
         <thead>
           <tr>
+            <th>勾选</th>
             <th>名称</th>
             <th>来源</th>
             <th>启用</th>
-            <th>远端</th>
-            <th>操作</th>
           </tr>
         </thead>
         <tbody id="localRows"></tbody>
       </table>
-      <div id="exportOutput" class="output">导出结果显示在这里...</div>
+      <div id="exportOutput" class="output">导出结果会显示在这里，并自动下载 JSON 文件。</div>
     </article>
   </section>
 </main>
 
 <script src="/common.js"></script>
 <script>
-  const previewRows = document.getElementById("previewRows");
-  const localRows = document.getElementById("localRows");
-  const importStatus = document.getElementById("importStatus");
   const localStatus = document.getElementById("localStatus");
+  const localRows = document.getElementById("localRows");
   const exportOutput = document.getElementById("exportOutput");
 
-  async function previewRemoteTools() {
-    const remoteBaseUrl = document.getElementById("remoteBaseUrl").value.trim();
-    if (!remoteBaseUrl) {
-      setStatus(importStatus, "请填写 remoteBaseUrl", "error");
-      return;
-    }
-    setStatus(importStatus, "预览中...");
-    try {
-      const data = await api("/admin/mcp/import/preview", {
-        method: "POST",
-        body: JSON.stringify({ remoteBaseUrl })
-      });
-
-      const tools = data.tools || [];
-      previewRows.innerHTML = tools.map((t) => `
-        <tr>
-          <td><input type="checkbox" class="tool-checkbox" value="${esc(t.name)}" checked></td>
-          <td>${esc(t.name)}</td>
-          <td>${esc(t.description || "")}</td>
-        </tr>
-      `).join("");
-      setStatus(importStatus, `预览成功，发现 ${tools.length} 个工具`, "ok");
-    } catch (e) {
-      setStatus(importStatus, e.message, "error");
-    }
+  function getSelectedToolNames() {
+    return Array.from(document.querySelectorAll(".tool-checkbox:checked")).map((el) => el.value);
   }
 
-  async function importSelectedTools() {
-    const remoteBaseUrl = document.getElementById("remoteBaseUrl").value.trim();
-    const alias = document.getElementById("alias").value.trim() || "imported";
-    const selected = Array.from(document.querySelectorAll(".tool-checkbox:checked")).map((el) => el.value);
-
-    if (!remoteBaseUrl) {
-      setStatus(importStatus, "请填写 remoteBaseUrl", "error");
-      return;
-    }
-    setStatus(importStatus, "导入中...");
-    try {
-      const data = await api("/admin/mcp/import/commit", {
-        method: "POST",
-        body: JSON.stringify({ remoteBaseUrl, alias, toolNames: selected })
-      });
-      setStatus(importStatus, `导入完成: ${data.imported || 0}`, "ok");
-      await loadLocalTools();
-    } catch (e) {
-      setStatus(importStatus, e.message, "error");
-    }
+  function setAllSelection(checked) {
+    document.querySelectorAll(".tool-checkbox").forEach((el) => {
+      el.checked = checked;
+    });
   }
 
   async function loadLocalTools() {
-    setStatus(localStatus, "加载中...");
+    setStatus(localStatus, "加载工具中...");
     try {
       const tools = await api("/admin/mcp/tools");
       localRows.innerHTML = tools.map((t) => `
         <tr>
+          <td><input type="checkbox" class="tool-checkbox" value="${esc(t.name)}" checked></td>
           <td>${esc(t.name)}</td>
-          <td>${esc(t.source || "")}</td>
+          <td>${esc(t.source || "-")}</td>
           <td>${t.enabled ? "yes" : "no"}</td>
-          <td>${esc(t.remoteBaseUrl || "-")}</td>
-          <td>
-            <div class="actions">
-              <button class="secondary toggle-btn" data-name="${encodeURIComponent(t.name)}" data-enabled="${t.enabled}">${t.enabled ? "禁用" : "启用"}</button>
-              <button class="danger delete-btn" data-name="${encodeURIComponent(t.name)}">删除</button>
-            </div>
-          </td>
         </tr>
       `).join("");
-      setStatus(localStatus, `本地工具 ${tools.length} 个`, "ok");
+      setStatus(localStatus, `已加载 ${tools.length} 个工具`, "ok");
     } catch (e) {
       setStatus(localStatus, e.message, "error");
     }
   }
 
   async function exportTools() {
+    const selected = getSelectedToolNames();
+    if (selected.length === 0) {
+      setStatus(localStatus, "请至少勾选一个工具", "error");
+      return;
+    }
+
     setStatus(localStatus, "导出中...");
     try {
-      const data = await api("/admin/mcp/export");
+      const params = new URLSearchParams();
+      selected.forEach((name) => params.append("names", name));
+      const data = await api(`/admin/mcp/export?${params.toString()}`);
       exportOutput.textContent = JSON.stringify(data, null, 2);
-
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -172,39 +104,16 @@
       a.download = "mcp-tool-manifest.json";
       a.click();
       URL.revokeObjectURL(url);
-      setStatus(localStatus, "导出成功，已下载 JSON", "ok");
+      setStatus(localStatus, `导出成功，已下载 JSON（${selected.length} 个工具）`, "ok");
     } catch (e) {
       setStatus(localStatus, e.message, "error");
     }
   }
 
-  document.getElementById("previewBtn").addEventListener("click", previewRemoteTools);
-  document.getElementById("importBtn").addEventListener("click", importSelectedTools);
-  document.getElementById("refreshLocalBtn").addEventListener("click", loadLocalTools);
+  document.getElementById("refreshBtn").addEventListener("click", loadLocalTools);
+  document.getElementById("selectAllBtn").addEventListener("click", () => setAllSelection(true));
+  document.getElementById("clearSelectionBtn").addEventListener("click", () => setAllSelection(false));
   document.getElementById("exportBtn").addEventListener("click", exportTools);
-
-  localRows.addEventListener("click", async (event) => {
-    const toggleBtn = event.target.closest(".toggle-btn");
-    const deleteBtn = event.target.closest(".delete-btn");
-
-    if (toggleBtn) {
-      const name = decodeURIComponent(toggleBtn.dataset.name || "");
-      const enabled = !(toggleBtn.dataset.enabled === "true");
-      await api(`/admin/mcp/tools/${encodeURIComponent(name)}/toggle`, {
-        method: "PUT",
-        body: JSON.stringify({ enabled })
-      });
-      await loadLocalTools();
-      return;
-    }
-
-    if (deleteBtn) {
-      const name = decodeURIComponent(deleteBtn.dataset.name || "");
-      if (!confirm(`确认删除工具 ${name} ?`)) return;
-      await api(`/admin/mcp/tools/${encodeURIComponent(name)}`, { method: "DELETE" });
-      await loadLocalTools();
-    }
-  });
 
   loadLocalTools();
 </script>

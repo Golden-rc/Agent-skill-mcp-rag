@@ -5,7 +5,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
-import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
 
 import java.io.IOException;
@@ -51,7 +50,7 @@ public class ToolRegistry {
         List<Map<String, Object>> all = new ArrayList<>();
 
         for (McpTool tool : builtinToolsByName.values()) {
-            all.add(toMetadata(tool.name(), tool.description(), defaultTextSchema()));
+            all.add(toMetadata(tool.name(), tool.description(), tool.inputSchema()));
         }
 
         for (ImportedTool tool : importedToolsByName.values()) {
@@ -75,7 +74,7 @@ public class ToolRegistry {
                     "description", tool.description(),
                     "source", "builtin",
                     "enabled", true,
-                    "inputSchema", defaultTextSchema()
+                    "inputSchema", tool.inputSchema()
             ));
         }
         for (ImportedTool tool : importedToolsByName.values()) {
@@ -90,55 +89,6 @@ public class ToolRegistry {
             ));
         }
         return items;
-    }
-
-    public synchronized Map<String, Object> previewImport(String remoteBaseUrl) {
-        ensureRemoteInitialized(remoteBaseUrl);
-        List<Map<String, Object>> tools = fetchRemoteTools(remoteBaseUrl);
-        return Map.of(
-                "remoteBaseUrl", remoteBaseUrl,
-                "tools", tools,
-                "count", tools.size()
-        );
-    }
-
-    public synchronized Map<String, Object> commitImport(String remoteBaseUrl,
-                                                         String alias,
-                                                         List<String> selectedRemoteToolNames) {
-        ensureRemoteInitialized(remoteBaseUrl);
-        String safeAlias = normalizeAlias(alias);
-        List<Map<String, Object>> remoteTools = fetchRemoteTools(remoteBaseUrl);
-
-        Set<String> selected = Set.copyOf(selectedRemoteToolNames == null ? List.of() : selectedRemoteToolNames);
-        int imported = 0;
-
-        for (Map<String, Object> remoteTool : remoteTools) {
-            String remoteName = String.valueOf(remoteTool.get("name"));
-            if (!selected.isEmpty() && !selected.contains(remoteName)) {
-                continue;
-            }
-
-            String localName = uniqueLocalName(safeAlias + "." + remoteName);
-            ImportedTool importedTool = new ImportedTool();
-            importedTool.setName(localName);
-            importedTool.setRemoteToolName(remoteName);
-            importedTool.setDescription(String.valueOf(remoteTool.getOrDefault("description", "")));
-            importedTool.setRemoteBaseUrl(remoteBaseUrl);
-            importedTool.setEnabled(true);
-
-            Object schema = remoteTool.get("inputSchema");
-            if (schema instanceof Map<?, ?> m) {
-                importedTool.setInputSchema((Map<String, Object>) m);
-            } else {
-                importedTool.setInputSchema(defaultTextSchema());
-            }
-
-            importedToolsByName.put(localName, importedTool);
-            imported++;
-        }
-
-        persistImportedTools();
-        return Map.of("imported", imported, "total", importedToolsByName.size());
     }
 
     public synchronized Map<String, Object> exportManifest(List<String> names) {
@@ -231,44 +181,6 @@ public class ToolRegistry {
         return "";
     }
 
-    private List<Map<String, Object>> fetchRemoteTools(String remoteBaseUrl) {
-        Map<String, Object> request = new HashMap<>();
-        request.put("jsonrpc", "2.0");
-        request.put("id", "remote-tools-list");
-        request.put("method", "tools/list");
-        request.put("params", Map.of());
-
-        RestClient restClient = RestClient.builder().baseUrl(remoteBaseUrl).build();
-        Map<String, Object> response = restClient.post()
-                .uri("/mcp")
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(request)
-                .retrieve()
-                .body(Map.class);
-
-        if (response == null) {
-            return List.of();
-        }
-
-        Object resultObj = response.get("result");
-        if (!(resultObj instanceof Map<?, ?> result)) {
-            return List.of();
-        }
-
-        Object toolsObj = result.get("tools");
-        if (!(toolsObj instanceof List<?> tools)) {
-            return List.of();
-        }
-
-        List<Map<String, Object>> output = new ArrayList<>();
-        for (Object tool : tools) {
-            if (tool instanceof Map<?, ?> t) {
-                output.add((Map<String, Object>) t);
-            }
-        }
-        return output;
-    }
-
     private void ensureRemoteInitialized(String remoteBaseUrl) {
         if (initializedRemoteBaseUrls.contains(remoteBaseUrl)) {
             return;
@@ -327,25 +239,6 @@ public class ToolRegistry {
                 ),
                 "required", List.of("text")
         );
-    }
-
-    private String normalizeAlias(String alias) {
-        String safe = StringUtils.hasText(alias) ? alias.trim().toLowerCase() : "imported";
-        return safe.replaceAll("[^a-z0-9._-]", "-");
-    }
-
-    private String uniqueLocalName(String candidate) {
-        if (!builtinToolsByName.containsKey(candidate) && !importedToolsByName.containsKey(candidate)) {
-            return candidate;
-        }
-        int i = 2;
-        while (true) {
-            String next = candidate + "-" + i;
-            if (!builtinToolsByName.containsKey(next) && !importedToolsByName.containsKey(next)) {
-                return next;
-            }
-            i++;
-        }
     }
 
     private void loadImportedTools() {
