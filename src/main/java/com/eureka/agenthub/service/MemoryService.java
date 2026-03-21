@@ -11,8 +11,14 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 
 @Service
+/**
+ * 会话记忆服务（Redis）。
+ * <p>
+ * 使用 `chat:mem:{sessionId}` 列表保存消息，支持 TTL、会话枚举、会话清理。
+ */
 public class MemoryService {
 
     private final StringRedisTemplate redisTemplate;
@@ -39,6 +45,7 @@ public class MemoryService {
             try {
                 messages.add(objectMapper.readValue(item, ChatMessage.class));
             } catch (JsonProcessingException ignored) {
+                // 单条消息解析失败时跳过，避免整个会话读取失败。
             }
         }
         return messages;
@@ -55,9 +62,41 @@ public class MemoryService {
         int max = appProperties.getMemory().getMaxHistoryMessages();
         Long size = redisTemplate.opsForList().size(key);
         if (size != null && size > max) {
+            // 只保留最近 N 条消息，控制上下文长度。
             redisTemplate.opsForList().trim(key, size - max, size - 1);
         }
+        // 每次写入都刷新会话 TTL。
         redisTemplate.expire(key, Duration.ofHours(appProperties.getMemory().getHistoryTtlHours()));
+    }
+
+    public List<SessionInfo> listSessions() {
+        // 扫描会话键用于后台运维页面。
+        Set<String> keys = redisTemplate.keys("chat:mem:*");
+        if (keys == null || keys.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        List<SessionInfo> sessions = new ArrayList<>();
+        for (String fullKey : keys) {
+            String sessionId = fullKey.replaceFirst("^chat:mem:", "");
+            Long size = redisTemplate.opsForList().size(fullKey);
+            Long ttl = redisTemplate.getExpire(fullKey);
+            sessions.add(new SessionInfo(sessionId, size == null ? 0 : size.intValue(), ttl == null ? -1 : ttl));
+        }
+        sessions.sort((a, b) -> Integer.compare(b.messageCount(), a.messageCount()));
+        return sessions;
+    }
+
+    public int clearSession(String sessionId) {
+        // 返回 1/0 便于前端展示是否真的删除。
+        Boolean deleted = redisTemplate.delete(key(sessionId));
+        return Boolean.TRUE.equals(deleted) ? 1 : 0;
+    }
+
+    /**
+     * 会话简要信息。
+     */
+    public record SessionInfo(String sessionId, int messageCount, long ttlSeconds) {
     }
 
     private String key(String sessionId) {

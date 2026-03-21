@@ -12,6 +12,9 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/rag")
+/**
+ * RAG 数据写入入口。
+ */
 public class IngestController {
 
     private final RagService ragService;
@@ -21,6 +24,9 @@ public class IngestController {
     }
 
     @PostMapping("/ingest")
+    /**
+     * 将文本切块并写入向量库。
+     */
     public ResponseEntity<IngestResponse> ingest(@Valid @RequestBody IngestRequest request) {
         int inserted = ragService.ingest(request.getSource(), request.getText());
         return ResponseEntity.ok(new IngestResponse(request.getSource(), inserted));

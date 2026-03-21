@@ -18,11 +18,10 @@
       --accent: #36d1b7;
       --accent-2: #ffb86a;
       --danger: #ff6d7d;
+      --ok: #8de17b;
     }
 
-    * {
-      box-sizing: border-box;
-    }
+    * { box-sizing: border-box; }
 
     body {
       margin: 0;
@@ -33,87 +32,48 @@
         radial-gradient(800px 420px at 100% 0%, rgba(255, 184, 106, 0.17), transparent),
         linear-gradient(140deg, var(--bg-0), var(--bg-1));
       min-height: 100vh;
-      padding: 28px 18px;
+      padding: 26px 16px;
     }
 
-    .wrap {
-      max-width: 1080px;
-      margin: 0 auto;
-    }
-
-    .hero {
-      margin-bottom: 20px;
-      animation: fadeUp .45s ease-out both;
-    }
-
-    .hero h1 {
-      margin: 0;
-      font-size: clamp(1.5rem, 4vw, 2.2rem);
-      font-family: "Space Grotesk", sans-serif;
-      letter-spacing: 0.4px;
-    }
-
-    .hero p {
-      margin: 6px 0 0;
-      color: var(--muted);
-      font-size: 0.96rem;
-    }
+    .wrap { max-width: 1200px; margin: 0 auto; }
+    .hero { margin-bottom: 16px; }
+    .hero h1 { margin: 0; font-size: clamp(1.4rem, 4vw, 2.1rem); font-family: "Space Grotesk", sans-serif; }
+    .hero p { margin: 6px 0 0; color: var(--muted); font-size: .95rem; }
 
     .grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 16px;
+      gap: 14px;
     }
 
     .card {
       background: var(--card);
       border: 1px solid var(--line);
-      border-radius: 16px;
-      padding: 16px;
+      border-radius: 14px;
+      padding: 14px;
       backdrop-filter: blur(8px);
-      box-shadow: 0 18px 48px rgba(0, 0, 0, 0.25);
-      animation: fadeUp .5s ease-out both;
+      box-shadow: 0 12px 36px rgba(0, 0, 0, .25);
     }
 
-    .card h2 {
-      margin: 2px 0 10px;
-      font-family: "Space Grotesk", sans-serif;
-      font-size: 1.1rem;
-    }
+    .wide { grid-column: 1 / -1; }
+    .card h2 { margin: 0 0 10px; font-family: "Space Grotesk", sans-serif; font-size: 1.04rem; }
+    .row { display: grid; gap: 8px; margin-bottom: 10px; }
+    .inline { grid-template-columns: 1fr 1fr; gap: 8px; }
+    .inline-3 { grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
 
-    .row {
-      display: grid;
-      gap: 8px;
-      margin-bottom: 10px;
-    }
+    label { font-size: .84rem; color: var(--muted); }
 
-    .row.inline {
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-    }
-
-    label {
-      font-size: 0.85rem;
-      color: var(--muted);
-    }
-
-    input,
-    select,
-    textarea,
-    button {
+    input, select, textarea, button {
       width: 100%;
       border: 1px solid var(--line);
       border-radius: 10px;
-      padding: 10px 11px;
+      padding: 9px 10px;
       font: inherit;
       color: var(--text);
       background: rgba(8, 13, 22, 0.7);
     }
 
-    textarea {
-      min-height: 116px;
-      resize: vertical;
-    }
+    textarea { min-height: 100px; resize: vertical; }
 
     button {
       border: none;
@@ -121,87 +81,63 @@
       color: #10202a;
       font-weight: 700;
       cursor: pointer;
-      transition: transform .15s ease, filter .2s ease;
     }
 
-    button:hover {
-      filter: brightness(1.05);
-      transform: translateY(-1px);
+    button.secondary {
+      background: rgba(255, 255, 255, 0.09);
+      color: var(--text);
+      border: 1px solid var(--line);
     }
 
-    .status {
-      margin-top: 8px;
-      color: var(--muted);
-      font-size: 0.88rem;
-      min-height: 20px;
-    }
+    button.danger { background: linear-gradient(100deg, #f07887, #ff6d7d); color: white; }
 
-    .status.error {
-      color: var(--danger);
-    }
+    .status { min-height: 18px; font-size: .86rem; color: var(--muted); margin-top: 6px; }
+    .status.ok { color: var(--ok); }
+    .status.error { color: var(--danger); }
 
     .output {
       margin-top: 10px;
       border: 1px solid var(--line);
-      border-radius: 12px;
+      border-radius: 10px;
       padding: 10px;
       background: rgba(7, 11, 19, 0.72);
-      min-height: 170px;
+      min-height: 120px;
       white-space: pre-wrap;
       overflow-wrap: anywhere;
-      font-size: 0.92rem;
+      font-size: .91rem;
     }
 
-    .kpi {
-      margin-top: 9px;
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
+    .kpi { margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap; }
+    .tag { font-size: .76rem; border: 1px solid var(--line); border-radius: 99px; padding: 4px 8px; color: #d3dff1; }
 
-    .tag {
-      font-size: 0.78rem;
-      color: #d3dff1;
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      padding: 5px 9px;
-      background: rgba(255, 255, 255, 0.05);
-    }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    th, td { border-bottom: 1px solid var(--line); padding: 8px 6px; font-size: .85rem; text-align: left; vertical-align: top; }
+    th { color: var(--muted); font-weight: 500; }
+    .actions { display: flex; gap: 6px; }
+    .actions button { padding: 6px 8px; font-size: .78rem; }
+    .small { font-size: .78rem; color: var(--muted); }
 
-    @keyframes fadeUp {
-      from {
-        opacity: 0;
-        transform: translateY(8px);
-      }
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
-    }
-
-    @media (max-width: 900px) {
-      .grid {
-        grid-template-columns: 1fr;
-      }
-      .row.inline {
-        grid-template-columns: 1fr;
-      }
+    @media (max-width: 980px) {
+      .grid { grid-template-columns: 1fr; }
+      .inline, .inline-3 { grid-template-columns: 1fr; }
     }
   </style>
 </head>
 <body>
 <main class="wrap">
+  <!-- 顶部简介 -->
   <section class="hero">
-    <h1>Agent Hub Frontend Console</h1>
-    <p>用于本地验证 `/rag/ingest` 和 `/chat`，支持 `openai` / `ollama` / `auto`。</p>
+    <h1>Agent Hub Operations Console</h1>
+    <p>支持聊天、知识库管理（RAG Chunk）、会话管理（Redis Session）。</p>
   </section>
 
   <section class="grid">
+    <!-- RAG 写入面板 -->
     <article class="card">
       <h2>RAG Ingest</h2>
       <div class="row">
         <label for="source">Source</label>
-        <input id="source" value="internship-guide" />
+        <input id="source" value="internship-guide">
       </div>
       <div class="row">
         <label for="ragText">Text</label>
@@ -212,12 +148,13 @@
       <div id="ingestOutput" class="output">等待写入...</div>
     </article>
 
+    <!-- 聊天面板 -->
     <article class="card">
       <h2>Chat</h2>
       <div class="row inline">
         <div>
           <label for="sessionId">Session ID</label>
-          <input id="sessionId" value="demo-ui-1" />
+          <input id="sessionId" value="demo-ui-1">
         </div>
         <div>
           <label for="provider">Provider</label>
@@ -234,95 +171,293 @@
       </div>
       <button id="chatBtn">发送消息</button>
       <div id="chatStatus" class="status"></div>
-      <div class="kpi" id="chatKpi"></div>
+      <div id="chatKpi" class="kpi"></div>
       <div id="chatOutput" class="output">等待对话...</div>
+    </article>
+
+    <!-- RAG 后台管理面板 -->
+    <article class="card wide">
+      <h2>RAG 数据管理</h2>
+      <div class="row inline-3">
+        <div>
+          <label for="ragSourceFilter">Source Filter</label>
+          <input id="ragSourceFilter" placeholder="留空=全部">
+        </div>
+        <div>
+          <label for="ragLimit">Limit</label>
+          <input id="ragLimit" type="number" value="50" min="1" max="200">
+        </div>
+        <div style="display:flex; align-items:end; gap:8px;">
+          <button id="refreshRagBtn" class="secondary">刷新列表</button>
+        </div>
+      </div>
+      <div id="ragManageStatus" class="status"></div>
+      <div class="small">可修改 `source` 和 `content`，保存时会自动重建 embedding。</div>
+      <table>
+        <thead>
+        <tr>
+          <th>ID</th>
+          <th>Source</th>
+          <th>Content</th>
+          <th>Created</th>
+          <th>Actions</th>
+        </tr>
+        </thead>
+        <tbody id="ragRows"></tbody>
+      </table>
+    </article>
+
+    <!-- Session 后台管理面板 -->
+    <article class="card wide">
+      <h2>Session 管理</h2>
+      <div class="row inline-3">
+        <div>
+          <label for="sessionPick">Session</label>
+          <select id="sessionPick"></select>
+        </div>
+        <div style="display:flex; align-items:end; gap:8px;">
+          <button id="refreshSessionBtn" class="secondary">刷新会话</button>
+        </div>
+        <div style="display:flex; align-items:end; gap:8px;">
+          <button id="clearSessionBtn" class="danger">清空当前会话</button>
+        </div>
+      </div>
+      <div id="sessionStatus" class="status"></div>
+      <table>
+        <thead>
+        <tr>
+          <th>Session ID</th>
+          <th>Message Count</th>
+          <th>TTL(s)</th>
+        </tr>
+        </thead>
+        <tbody id="sessionRows"></tbody>
+      </table>
+      <div id="sessionHistory" class="output">选择会话后展示历史消息...</div>
     </article>
   </section>
 </main>
 
 <script>
+  // ---- 基础 DOM 引用 ----
   const ingestBtn = document.getElementById("ingestBtn");
   const chatBtn = document.getElementById("chatBtn");
+  const refreshRagBtn = document.getElementById("refreshRagBtn");
+  const refreshSessionBtn = document.getElementById("refreshSessionBtn");
+  const clearSessionBtn = document.getElementById("clearSessionBtn");
+  const sessionPick = document.getElementById("sessionPick");
 
   const ingestStatus = document.getElementById("ingestStatus");
   const ingestOutput = document.getElementById("ingestOutput");
   const chatStatus = document.getElementById("chatStatus");
   const chatOutput = document.getElementById("chatOutput");
   const chatKpi = document.getElementById("chatKpi");
+  const ragManageStatus = document.getElementById("ragManageStatus");
+  const ragRows = document.getElementById("ragRows");
+  const sessionStatus = document.getElementById("sessionStatus");
+  const sessionRows = document.getElementById("sessionRows");
+  const sessionHistory = document.getElementById("sessionHistory");
 
-  function setStatus(el, text, isError = false) {
+  // ---- 通用工具函数 ----
+  function setStatus(el, text, type = "") {
     el.textContent = text;
-    el.classList.toggle("error", isError);
+    el.classList.remove("ok", "error");
+    if (type) el.classList.add(type);
   }
 
-  function pretty(data) {
-    return JSON.stringify(data, null, 2);
+  function esc(text) {
+    return (text || "").replace(/[&<>\"']/g, (m) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      "\"": "&quot;",
+      "'": "&#39;"
+    }[m]));
   }
 
+  // ---- 统一 API 调用封装 ----
+  async function api(url, options = {}) {
+    const res = await fetch(url, {
+      headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+      ...options
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    return data;
+  }
+
+  // ---- RAG 写入 ----
   ingestBtn.addEventListener("click", async () => {
-    setStatus(ingestStatus, "写入中...");
-    ingestOutput.textContent = "";
-
-    const payload = {
-      source: document.getElementById("source").value.trim(),
-      text: document.getElementById("ragText").value.trim()
-    };
-
     try {
-      const res = await fetch("/rag/ingest", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "ingest failed");
-      setStatus(ingestStatus, "写入成功");
-      ingestOutput.textContent = pretty(data);
+      setStatus(ingestStatus, "写入中...");
+      const payload = {
+        source: document.getElementById("source").value.trim(),
+        text: document.getElementById("ragText").value.trim()
+      };
+      const data = await api("/rag/ingest", { method: "POST", body: JSON.stringify(payload) });
+      setStatus(ingestStatus, "写入成功", "ok");
+      ingestOutput.textContent = JSON.stringify(data, null, 2);
+      await loadRagChunks();
     } catch (e) {
-      setStatus(ingestStatus, e.message, true);
-      ingestOutput.textContent = "请求失败，请检查服务是否已启动。";
+      setStatus(ingestStatus, e.message, "error");
     }
   });
 
+  // ---- 聊天调用 ----
   chatBtn.addEventListener("click", async () => {
-    setStatus(chatStatus, "请求中...");
-    chatOutput.textContent = "";
-    chatKpi.innerHTML = "";
-
-    const payload = {
-      sessionId: document.getElementById("sessionId").value.trim(),
-      provider: document.getElementById("provider").value,
-      message: document.getElementById("message").value.trim()
-    };
-
     try {
-      const res = await fetch("/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "chat failed");
+      setStatus(chatStatus, "请求中...");
+      chatOutput.textContent = "";
+      chatKpi.innerHTML = "";
+      const payload = {
+        sessionId: document.getElementById("sessionId").value.trim(),
+        provider: document.getElementById("provider").value,
+        message: document.getElementById("message").value.trim()
+      };
+      const data = await api("/chat", { method: "POST", body: JSON.stringify(payload) });
+      chatKpi.innerHTML =
+        `<span class="tag">provider: ${esc(data.providerUsed || "-")}</span>` +
+        `<span class="tag">tools: ${esc((data.toolCalls || []).join(", ") || "none")}</span>` +
+        `<span class="tag">citations: ${(data.citations || []).length}</span>`;
 
-      const providerTag = `<span class="tag">provider: ${data.providerUsed || "-"}</span>`;
-      const toolTag = `<span class="tag">tools: ${(data.toolCalls || []).join(", ") || "none"}</span>`;
-      const citeTag = `<span class="tag">citations: ${(data.citations || []).length}</span>`;
-      chatKpi.innerHTML = providerTag + toolTag + citeTag;
-
-      let text = data.answer || "";
-      if (Array.isArray(data.citations) && data.citations.length > 0) {
-        text += "\n\n---\n引用:\n";
-        data.citations.forEach((c, i) => {
-          text += `${i + 1}. [${c.source}] score=${(c.score ?? 0).toFixed(4)}\n${c.content}\n`;
+      let out = data.answer || "";
+      if ((data.citations || []).length > 0) {
+        out += "\n\n---\n引用:\n";
+        (data.citations || []).forEach((c, idx) => {
+          out += `${idx + 1}. [${c.source}] score=${(c.score || 0).toFixed(4)}\n${c.content}\n`;
         });
       }
-      chatOutput.textContent = text;
-      setStatus(chatStatus, "请求成功");
+      chatOutput.textContent = out;
+      setStatus(chatStatus, "请求成功", "ok");
+      await loadSessions();
     } catch (e) {
-      setStatus(chatStatus, e.message, true);
+      setStatus(chatStatus, e.message, "error");
       chatOutput.textContent = "请求失败，请检查 API Key / 服务状态。";
     }
   });
+
+  // ---- RAG 管理（查/改/删） ----
+  async function loadRagChunks() {
+    try {
+      setStatus(ragManageStatus, "加载中...");
+      const source = document.getElementById("ragSourceFilter").value.trim();
+      const limit = Number(document.getElementById("ragLimit").value || 50);
+      const q = new URLSearchParams();
+      if (source) q.set("source", source);
+      q.set("limit", String(limit));
+      const rows = await api(`/admin/rag/chunks?${q.toString()}`);
+
+      ragRows.innerHTML = rows.map((r) => `
+        <tr>
+          <td>${r.id}</td>
+          <td><input id="src-${r.id}" value="${esc(r.source)}"></td>
+          <td><textarea id="content-${r.id}" style="min-height:68px;">${esc(r.content)}</textarea></td>
+          <td>${esc(r.createdAt)}</td>
+          <td>
+            <div class="actions">
+              <button class="secondary" onclick="saveChunk(${r.id})">保存</button>
+              <button class="danger" onclick="deleteChunk(${r.id})">删除</button>
+            </div>
+          </td>
+        </tr>
+      `).join("");
+
+      setStatus(ragManageStatus, `已加载 ${rows.length} 条`, "ok");
+    } catch (e) {
+      setStatus(ragManageStatus, e.message, "error");
+    }
+  }
+
+  window.saveChunk = async (id) => {
+    try {
+      const payload = {
+        source: document.getElementById(`src-${id}`).value.trim(),
+        content: document.getElementById(`content-${id}`).value.trim()
+      };
+      await api(`/admin/rag/chunks/${id}`, { method: "PUT", body: JSON.stringify(payload) });
+      setStatus(ragManageStatus, `Chunk ${id} 已更新`, "ok");
+      await loadRagChunks();
+    } catch (e) {
+      setStatus(ragManageStatus, e.message, "error");
+    }
+  };
+
+  window.deleteChunk = async (id) => {
+    if (!confirm(`确认删除 chunk ${id} ?`)) return;
+    try {
+      await api(`/admin/rag/chunks/${id}`, { method: "DELETE" });
+      setStatus(ragManageStatus, `Chunk ${id} 已删除`, "ok");
+      await loadRagChunks();
+    } catch (e) {
+      setStatus(ragManageStatus, e.message, "error");
+    }
+  };
+
+  // ---- Session 管理 ----
+  async function loadSessions() {
+    try {
+      setStatus(sessionStatus, "加载会话中...");
+      const sessions = await api("/admin/sessions");
+      sessionRows.innerHTML = sessions.map((s) => `
+        <tr>
+          <td>${esc(s.sessionId)}</td>
+          <td>${s.messageCount}</td>
+          <td>${s.ttlSeconds}</td>
+        </tr>
+      `).join("");
+
+      const current = sessionPick.value;
+      sessionPick.innerHTML = sessions.map((s) => `<option value="${esc(s.sessionId)}">${esc(s.sessionId)}</option>`).join("");
+      if (current && sessions.some((s) => s.sessionId === current)) {
+        sessionPick.value = current;
+      }
+
+      if (sessionPick.value) {
+        await loadSessionHistory(sessionPick.value);
+      } else {
+        sessionHistory.textContent = "暂无会话数据";
+      }
+      setStatus(sessionStatus, `会话数: ${sessions.length}`, "ok");
+    } catch (e) {
+      setStatus(sessionStatus, e.message, "error");
+    }
+  }
+
+  async function loadSessionHistory(sessionId) {
+    if (!sessionId) {
+      sessionHistory.textContent = "请选择会话";
+      return;
+    }
+    try {
+      const history = await api(`/admin/sessions/${encodeURIComponent(sessionId)}`);
+      sessionHistory.textContent = history.length ? JSON.stringify(history, null, 2) : "该会话暂无历史";
+    } catch (e) {
+      sessionHistory.textContent = e.message;
+    }
+  }
+
+  refreshRagBtn.addEventListener("click", loadRagChunks);
+  refreshSessionBtn.addEventListener("click", loadSessions);
+  sessionPick.addEventListener("change", () => loadSessionHistory(sessionPick.value));
+
+  clearSessionBtn.addEventListener("click", async () => {
+    const sessionId = sessionPick.value;
+    if (!sessionId) {
+      setStatus(sessionStatus, "没有可清理的会话", "error");
+      return;
+    }
+    if (!confirm(`确认清空会话 ${sessionId} ?`)) return;
+    try {
+      await api(`/admin/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
+      setStatus(sessionStatus, `会话 ${sessionId} 已清理`, "ok");
+      await loadSessions();
+    } catch (e) {
+      setStatus(sessionStatus, e.message, "error");
+    }
+  });
+
+  loadRagChunks();
+  loadSessions();
 </script>
 </body>
 </html>

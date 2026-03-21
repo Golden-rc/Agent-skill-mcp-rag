@@ -25,8 +25,8 @@
       <option name="environmentProperties">
         <map>
           <entry key="OPENAI_BASE_URL" value="https://open.bigmodel.cn/api/paas/v4" />
-          <entry key="OPENAI_CHAT_MODEL" value="glm-4-flash" />
-          <entry key="OPENAI_API_KEY" value="94dff505af9c4d749d9c79b200cd7053.KwHs6LqwfXRbB1YC" />
+          <entry key="OPENAI_CHAT_MODEL" value="glm-4" />
+          <entry key="OPENAI_API_KEY" value="REPLACE_WITH_YOUR_API_KEY" />
         </map>
       </option>
     </RunnerSettings>

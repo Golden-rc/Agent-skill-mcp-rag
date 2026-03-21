@@ -19,6 +19,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(ChatController.class)
+/**
+ * ChatController Web 层测试。
+ */
 class ChatControllerTest {
 
     @Autowired
@@ -29,6 +32,7 @@ class ChatControllerTest {
 
     @Test
     void shouldReturnChatResponse() throws Exception {
+        // 模拟 service 返回，验证 controller 出参结构。
         ChatResponse response = new ChatResponse(
                 "ok",
                 "openai",
@@ -55,6 +59,7 @@ class ChatControllerTest {
 
     @Test
     void shouldRejectInvalidRequest() throws Exception {
+        // 校验 @NotBlank 生效。
         mockMvc.perform(post("/chat")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""

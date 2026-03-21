@@ -25,14 +25,14 @@ export PATH="$JAVA_HOME/bin:$PATH"
 ## 2) Start infrastructure
 
 ```bash
-cp .env.example .env
+cp .env .env
 docker compose up -d
 ```
 
 If you use cloud API (no local Ollama), start only Postgres + Redis:
 
 ```bash
-cp .env.example .env
+cp .env .env
 docker compose -f docker-compose.api.yml up -d
 ```
 
@@ -88,6 +88,16 @@ curl -X POST http://localhost:8080/chat \
   }'
 ```
 
+Admin APIs for operations page:
+
+```bash
+# list rag chunks
+curl "http://localhost:8080/admin/rag/chunks?limit=20"
+
+# list sessions
+curl "http://localhost:8080/admin/sessions"
+```
+
 ## 6) API config (BigModel)
 
 If you want cloud model routing via BigModel, set in `.env` (or shell env):
@@ -97,6 +107,10 @@ OPENAI_BASE_URL=https://open.bigmodel.cn/api/paas/v4
 OPENAI_API_KEY=your_bigmodel_api_key
 OPENAI_CHAT_MODEL=glm-4-flash
 ```
+
+The app loads `.env` automatically at startup.
+
+For BigModel `OPENAI_API_KEY` in `id.secret` format, the app will auto-generate the bearer token internally.
 
 Any OpenAI-compatible gateway can be used by changing `OPENAI_BASE_URL`.
 

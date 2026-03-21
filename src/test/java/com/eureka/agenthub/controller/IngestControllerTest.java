@@ -15,6 +15,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(IngestController.class)
+/**
+ * IngestController Web 层测试。
+ */
 class IngestControllerTest {
 
     @Autowired
@@ -25,6 +28,7 @@ class IngestControllerTest {
 
     @Test
     void shouldIngestTextSuccessfully() throws Exception {
+        // 模拟写入 2 个 chunk。
         when(ragService.ingest(eq("internship-guide"), eq("demo text"))).thenReturn(2);
 
         mockMvc.perform(post("/rag/ingest")
@@ -42,6 +46,7 @@ class IngestControllerTest {
 
     @Test
     void shouldRejectInvalidIngestRequest() throws Exception {
+        // 空 source/text 应触发参数校验错误。
         mockMvc.perform(post("/rag/ingest")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""

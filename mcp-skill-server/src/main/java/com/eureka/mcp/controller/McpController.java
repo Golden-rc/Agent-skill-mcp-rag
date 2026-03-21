@@ -14,14 +14,23 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/mcp")
+/**
+ * 最小 MCP 服务实现。
+ * <p>
+ * 支持 tools/list 和 tools/call 两个方法，便于主应用做工具调用演示。
+ */
 public class McpController {
 
     @PostMapping
+    /**
+     * 统一 MCP JSON-RPC 入口。
+     */
     public ResponseEntity<Map<String, Object>> handle(@RequestBody Map<String, Object> request) {
         String method = String.valueOf(request.get("method"));
         Object id = request.getOrDefault("id", "1");
 
         if ("tools/list".equals(method)) {
+            // 返回当前可用工具清单。
             return ResponseEntity.ok(ok(id, Map.of(
                     "tools", List.of(
                             Map.of("name", "summarize", "description", "Summarize a text"),
@@ -31,6 +40,7 @@ public class McpController {
         }
 
         if ("tools/call".equals(method)) {
+            // 解析调用参数并执行工具。
             Map<String, Object> params = asMap(request.get("params"));
             String name = String.valueOf(params.get("name"));
             Map<String, Object> arguments = asMap(params.get("arguments"));
@@ -52,6 +62,7 @@ public class McpController {
     }
 
     private String summarize(String text) {
+        // 简易摘要：截断固定长度。
         String normalized = text.replace("\r\n", "\n").trim();
         if (normalized.isBlank()) {
             return "(empty text)";
@@ -61,6 +72,7 @@ public class McpController {
     }
 
     private String extractTodos(String text) {
+        // 简易待办提取：基于行和关键词规则。
         String[] lines = text.replace("\r\n", "\n").split("\n");
         List<String> todos = new ArrayList<>();
         for (String line : lines) {
@@ -83,6 +95,7 @@ public class McpController {
 
     @SuppressWarnings("unchecked")
     private Map<String, Object> asMap(Object value) {
+        // 安全转换，避免 ClassCastException。
         if (value instanceof Map<?, ?> map) {
             return (Map<String, Object>) map;
         }
@@ -90,6 +103,7 @@ public class McpController {
     }
 
     private Map<String, Object> ok(Object id, Map<String, Object> result) {
+        // 构造 JSON-RPC 成功响应。
         Map<String, Object> response = new HashMap<>();
         response.put("jsonrpc", "2.0");
         response.put("id", id);
@@ -98,6 +112,7 @@ public class McpController {
     }
 
     private Map<String, Object> error(Object id, int code, String message) {
+        // 构造 JSON-RPC 错误响应。
         Map<String, Object> response = new HashMap<>();
         response.put("jsonrpc", "2.0");
         response.put("id", id);

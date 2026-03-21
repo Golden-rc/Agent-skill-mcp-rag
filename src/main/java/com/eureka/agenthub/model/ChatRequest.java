@@ -2,12 +2,18 @@ package com.eureka.agenthub.model;
 
 import jakarta.validation.constraints.NotBlank;
 
+/**
+ * /chat 请求体。
+ */
 public class ChatRequest {
 
     @NotBlank
+    /** 会话 ID，用于 Redis 记忆隔离。 */
     private String sessionId;
     @NotBlank
+    /** 用户输入内容。 */
     private String message;
+    /** 模型提供方：auto/openai/ollama。 */
     private String provider = "auto";
 
     public String getSessionId() {

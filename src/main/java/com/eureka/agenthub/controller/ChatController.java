@@ -12,6 +12,9 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/chat")
+/**
+ * 聊天接口入口。
+ */
 public class ChatController {
 
     private final ChatService chatService;
@@ -21,6 +24,9 @@ public class ChatController {
     }
 
     @PostMapping
+    /**
+     * 统一聊天入口。
+     */
     public ResponseEntity<ChatResponse> chat(@Valid @RequestBody ChatRequest request) {
         return ResponseEntity.ok(chatService.chat(request));
     }
