@@ -96,15 +96,7 @@ public class ChatService {
 
         // 第三层：让模型做轻量意图分类。
         try {
-            List<ChatMessage> prompt = List.of(
-                    new ChatMessage("system",
-                            "You are an intent classifier. Output exactly one word: direct or rag. " +
-                                    "Choose direct for simple calculation/chit-chat/short factual answer. " +
-                                    "Choose rag for knowledge-base dependent requests, planning with references, " +
-                                    "or anything likely requiring retrieval context."),
-                    new ChatMessage("user", message)
-            );
-            String result = modelClientService.chat(provider, prompt).trim().toLowerCase(Locale.ROOT);
+            String result = modelClientService.classifyMode(provider, message);
             if (result.contains("direct")) {
                 return new ModeDecision("direct", "llm-classifier");
             }
