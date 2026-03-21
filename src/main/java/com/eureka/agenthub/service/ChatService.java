@@ -45,15 +45,14 @@ public class ChatService {
         String provider = providerRouter.pickProvider(request.getProvider());
         String userMessage = request.getMessage();
         String mode = normalizeMode(request.getMode());
-        boolean simpleQuestion = isSimpleQuestion(userMessage);
-        boolean directMode = "direct".equals(mode) || ("auto".equals(mode) && simpleQuestion);
-        boolean ragMode = "rag".equals(mode);
+        String effectiveMode = "auto".equals(mode) ? classifyAutoMode(provider, userMessage) : mode;
+        boolean directMode = "direct".equals(effectiveMode);
 
         // 2) 严格直答模式不带历史，避免被旧上下文污染。
         List<ChatMessage> history = directMode ? Collections.emptyList() : memoryService.loadHistory(request.getSessionId());
 
-        // 3) 严格直答跳过 RAG；知识库增强始终启用 RAG；auto 由 simpleQuestion 决定。
-        List<RagHit> hits = (directMode && !ragMode)
+        // 3) 严格直答跳过 RAG；知识库增强启用 RAG。
+        List<RagHit> hits = directMode
                 ? Collections.emptyList()
                 : ragService.retrieve(userMessage, 3);
 
@@ -81,6 +80,41 @@ public class ChatService {
         return new ChatResponse(answer, provider, hits, toolCalls);
     }
 
+    private String classifyAutoMode(String provider, String message) {
+        // 第一层：快速规则，优先拦截简单问题。
+        if (isSimpleQuestion(message)) {
+            return "direct";
+        }
+
+        // 第二层：显式知识库任务关键词，优先走增强模式。
+        if (isLikelyKnowledgeTask(message)) {
+            return "rag";
+        }
+
+        // 第三层：让模型做轻量意图分类。
+        try {
+            List<ChatMessage> prompt = List.of(
+                    new ChatMessage("system",
+                            "You are an intent classifier. Output exactly one word: direct or rag. " +
+                                    "Choose direct for simple calculation/chit-chat/short factual answer. " +
+                                    "Choose rag for knowledge-base dependent requests, planning with references, " +
+                                    "or anything likely requiring retrieval context."),
+                    new ChatMessage("user", message)
+            );
+            String result = modelClientService.chat(provider, prompt).trim().toLowerCase(Locale.ROOT);
+            if (result.contains("direct")) {
+                return "direct";
+            }
+            if (result.contains("rag")) {
+                return "rag";
+            }
+        } catch (Exception ignored) {
+        }
+
+        // 默认偏向知识增强，避免遗漏业务上下文。
+        return "rag";
+    }
+
     private String normalizeMode(String requestMode) {
         String mode = requestMode == null ? "auto" : requestMode.trim().toLowerCase(Locale.ROOT);
         return switch (mode) {
@@ -102,6 +136,19 @@ public class ChatService {
         }
         String lower = trimmed.toLowerCase(Locale.ROOT);
         return trimmed.length() <= 20 && (lower.equals("1+1") || lower.equals("2+2") || lower.equals("123"));
+    }
+
+    private boolean isLikelyKnowledgeTask(String message) {
+        String normalized = message.toLowerCase(Locale.ROOT);
+        return normalized.contains("知识库")
+                || normalized.contains("基于")
+                || normalized.contains("引用")
+                || normalized.contains("方案")
+                || normalized.contains("计划")
+                || normalized.contains("总结")
+                || normalized.contains("待办")
+                || normalized.contains("rag")
+                || normalized.contains("agent");
     }
 
     private String routeToolIfNeeded(String message, List<String> toolCalls) {
