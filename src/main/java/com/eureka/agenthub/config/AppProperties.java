@@ -157,6 +157,8 @@ public class AppProperties {
         private int finalTopK = 5;
         /** Minimal rerank score to keep in context. */
         private double minScore = 0.35;
+        /** Max citation content length returned by chat API. */
+        private int citationMaxChars = 50;
 
         public String getEmbeddingProvider() {
             return embeddingProvider;
@@ -228,6 +230,14 @@ public class AppProperties {
 
         public void setMinScore(double minScore) {
             this.minScore = minScore;
+        }
+
+        public int getCitationMaxChars() {
+            return citationMaxChars;
+        }
+
+        public void setCitationMaxChars(int citationMaxChars) {
+            this.citationMaxChars = citationMaxChars;
         }
     }
 }

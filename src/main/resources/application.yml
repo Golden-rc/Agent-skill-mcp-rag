@@ -31,6 +31,7 @@ app:
     recall-top-k: ${RAG_RECALL_TOPK:20}
     final-top-k: ${RAG_FINAL_TOPK:5}
     min-score: ${RAG_MIN_SCORE:0.35}
+    citation-max-chars: ${RAG_CITATION_MAX_CHARS:50}
   ollama:
     base-url: http://localhost:${OLLAMA_PORT:11434}
     chat-model: ${OLLAMA_CHAT_MODEL:qwen3:4b}

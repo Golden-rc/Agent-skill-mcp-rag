@@ -551,6 +551,13 @@
     }
   }
 
+  function shortText(text, maxLen = 80) {
+    const value = String(text || "").replace(/\s+/g, " ").trim();
+    if (!value) return "";
+    if (value.length <= maxLen) return value;
+    return value.slice(0, maxLen) + "...";
+  }
+
   function appendMessage(role, initialText = "") {
     const wrap = document.createElement("div");
     wrap.className = `msg ${role}`;
@@ -694,7 +701,7 @@
       if ((data.citations || []).length > 0) {
         out += "\n\n---\n引用:\n";
         (data.citations || []).forEach((c, idx) => {
-          out += `${idx + 1}. [${c.source}] score=${(c.score || 0).toFixed(4)}\n${c.content}\n`;
+          out += `${idx + 1}. [${c.source}] score=${(c.score || 0).toFixed(4)} ${shortText(c.content)}\n`;
         });
       }
       await typeText(assistantEl, out, 15);

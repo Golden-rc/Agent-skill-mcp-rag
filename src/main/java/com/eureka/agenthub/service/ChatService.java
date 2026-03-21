@@ -1,5 +1,6 @@
 package com.eureka.agenthub.service;
 
+import com.eureka.agenthub.config.AppProperties;
 import com.eureka.agenthub.model.ChatMessage;
 import com.eureka.agenthub.model.ChatRequest;
 import com.eureka.agenthub.model.ChatResponse;
@@ -28,17 +29,20 @@ public class ChatService {
     private final RagService ragService;
     private final McpClientService mcpClientService;
     private final ModelClientService modelClientService;
+    private final AppProperties appProperties;
 
     public ChatService(ProviderRouter providerRouter,
                        MemoryService memoryService,
                        RagService ragService,
                        McpClientService mcpClientService,
-                       ModelClientService modelClientService) {
+                       ModelClientService modelClientService,
+                       AppProperties appProperties) {
         this.providerRouter = providerRouter;
         this.memoryService = memoryService;
         this.ragService = ragService;
         this.mcpClientService = mcpClientService;
         this.modelClientService = modelClientService;
+        this.appProperties = appProperties;
     }
 
     public ChatResponse chat(ChatRequest request) {
@@ -87,7 +91,7 @@ public class ChatService {
         memoryService.append(request.getSessionId(), new ChatMessage("user", userMessage));
         memoryService.append(request.getSessionId(), new ChatMessage("assistant", answer));
 
-        return new ChatResponse(answer, provider, hits, toolCalls, imageUrls, effectiveMode, modeDecision.reason());
+        return new ChatResponse(answer, provider, toResponseCitations(hits), toolCalls, imageUrls, effectiveMode, modeDecision.reason());
     }
 
     private ModeDecision classifyAutoMode(String provider, String message) {
@@ -247,5 +251,15 @@ public class ChatService {
             return text;
         }
         return text.substring(0, maxLen) + "...";
+    }
+
+    private List<RagHit> toResponseCitations(List<RagHit> hits) {
+        int maxChars = Math.max(80, appProperties.getRag().getCitationMaxChars());
+        List<RagHit> compact = new ArrayList<>(hits.size());
+        for (RagHit hit : hits) {
+            String content = hit.content() == null ? "" : hit.content().replaceAll("\\s+", " ").trim();
+            compact.add(new RagHit(hit.source(), limitLength(content, maxChars), hit.score()));
+        }
+        return compact;
     }
 }

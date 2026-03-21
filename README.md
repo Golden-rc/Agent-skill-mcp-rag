@@ -144,6 +144,7 @@ RAG_CHUNK_MIN_SIZE=120
 RAG_RECALL_TOPK=20
 RAG_FINAL_TOPK=5
 RAG_MIN_SCORE=0.35
+RAG_CITATION_MAX_CHARS=50
 ```
 
 `embedding-3` is 2048-dim, but pgvector `ivfflat` index cannot index vectors above 2000 dimensions.
