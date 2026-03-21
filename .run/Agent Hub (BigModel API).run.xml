@@ -1,0 +1,35 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Agent Hub (BigModel API)" type="MavenRunConfiguration" factoryName="Maven">
+    <MavenSettings>
+      <option name="myGeneralSettings" />
+      <option name="myRunnerSettings" />
+      <option name="myRunnerParameters">
+        <MavenRunnerParameters>
+          <option name="profilesMap">
+            <map />
+          </option>
+          <option name="goals">
+            <list>
+              <option value="spring-boot:run" />
+            </list>
+          </option>
+          <option name="pomFileName" />
+          <option name="profiles">
+            <set />
+          </option>
+          <option name="workingDirPath" value="$PROJECT_DIR$" />
+        </MavenRunnerParameters>
+      </option>
+    </MavenSettings>
+    <RunnerSettings RunnerId="Run">
+      <option name="environmentProperties">
+        <map>
+          <entry key="OPENAI_BASE_URL" value="https://open.bigmodel.cn/api/paas/v4" />
+          <entry key="OPENAI_CHAT_MODEL" value="glm-4-flash" />
+          <entry key="OPENAI_API_KEY" value="94dff505af9c4d749d9c79b200cd7053.KwHs6LqwfXRbB1YC" />
+        </map>
+      </option>
+    </RunnerSettings>
+    <method v="2" />
+  </configuration>
+</component>

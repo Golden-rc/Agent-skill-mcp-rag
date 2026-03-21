@@ -1,0 +1,7 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="All Services (BigModel API)" type="CompoundRunConfigurationType" factoryName="Compound">
+    <toRun name="MCP Skill Server (Maven)" type="MavenRunConfiguration" />
+    <toRun name="Agent Hub (BigModel API)" type="MavenRunConfiguration" />
+    <method v="2" />
+  </configuration>
+</component>

@@ -1,0 +1,119 @@
+# Agent Hub (Java)
+
+Java multi-agent demo project for internship preparation, covering:
+
+- Multi-agent orchestration (`/chat`)
+- RAG with PostgreSQL + pgvector (`/rag/ingest`)
+- MCP-style skill server (`mcp-skill-server`)
+- Redis conversation memory
+- Dual model providers: local Ollama + OpenAI-compatible API
+
+## 1) Prerequisites
+
+- Docker + Docker Compose
+- Java 21
+- Maven 3.9+
+
+On macOS (Homebrew):
+
+```bash
+brew install openjdk@21 maven
+export JAVA_HOME="/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home"
+export PATH="$JAVA_HOME/bin:$PATH"
+```
+
+## 2) Start infrastructure
+
+```bash
+cp .env.example .env
+docker compose up -d
+```
+
+If you use cloud API (no local Ollama), start only Postgres + Redis:
+
+```bash
+cp .env.example .env
+docker compose -f docker-compose.api.yml up -d
+```
+
+Pull local models (first run):
+
+```bash
+ollama pull qwen3:4b
+ollama pull nomic-embed-text
+```
+
+## 3) Start MCP skill server
+
+```bash
+cd mcp-skill-server
+mvn spring-boot:run
+```
+
+## 4) Start main app
+
+```bash
+cd ..
+mvn spring-boot:run
+```
+
+## 5) Verify APIs
+
+Health:
+
+```bash
+curl http://localhost:8080/health
+```
+
+Ingest RAG text:
+
+```bash
+curl -X POST http://localhost:8080/rag/ingest \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "source":"internship-guide",
+    "text":"AI工程师实习重点包括Agent架构、RAG系统、工具链封装、记忆管理和安全合规。"
+  }'
+```
+
+Chat with auto provider (OpenAI if key exists, else Ollama):
+
+```bash
+curl -X POST http://localhost:8080/chat \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "sessionId":"demo-1",
+    "provider":"auto",
+    "message":"请基于知识库给我一个实习项目计划，并总结成待办"
+  }'
+```
+
+## 6) API config (BigModel)
+
+If you want cloud model routing via BigModel, set in `.env` (or shell env):
+
+```bash
+OPENAI_BASE_URL=https://open.bigmodel.cn/api/paas/v4
+OPENAI_API_KEY=your_bigmodel_api_key
+OPENAI_CHAT_MODEL=glm-4-flash
+```
+
+Any OpenAI-compatible gateway can be used by changing `OPENAI_BASE_URL`.
+
+Use `provider=openai` (or `provider=auto` with non-empty `OPENAI_API_KEY`) when calling `/chat`.
+
+## Troubleshooting
+
+- If Ollama returns memory errors for `qwen3:4b`, use a smaller model:
+
+```bash
+docker exec agenthub-ollama ollama pull qwen2.5:1.5b
+```
+
+- Then run the IDEA config `All Services (Low-Memory)`.
+
+## Project structure
+
+- `src/main/java/com/eureka/agenthub` main Spring Boot app
+- `mcp-skill-server` standalone skill server
+- `docker-compose.yml` local infra

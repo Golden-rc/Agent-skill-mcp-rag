@@ -1,0 +1,30 @@
+server:
+  port: 8080
+
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:${POSTGRES_PORT:5432}/${POSTGRES_DB:agentdb}
+    username: ${POSTGRES_USER:agent}
+    password: ${POSTGRES_PASSWORD:agent}
+  data:
+    redis:
+      host: localhost
+      port: ${REDIS_PORT:6379}
+  sql:
+    init:
+      mode: always
+
+app:
+  ollama:
+    base-url: http://localhost:${OLLAMA_PORT:11434}
+    chat-model: ${OLLAMA_CHAT_MODEL:qwen3:4b}
+    embedding-model: ${OLLAMA_EMBED_MODEL:nomic-embed-text:latest}
+  openai:
+    base-url: ${OPENAI_BASE_URL:https://api.openai.com/v1}
+    api-key: ${OPENAI_API_KEY:}
+    chat-model: ${OPENAI_CHAT_MODEL:gpt-4o-mini}
+  mcp:
+    base-url: ${MCP_BASE_URL:http://localhost:8090}
+  memory:
+    max-history-messages: 10
+    history-ttl-hours: 24
