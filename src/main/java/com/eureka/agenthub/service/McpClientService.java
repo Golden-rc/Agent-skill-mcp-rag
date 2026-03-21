@@ -6,7 +6,9 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -44,13 +46,7 @@ public class McpClientService {
         request.put("method", "tools/call");
         request.put("params", params);
 
-        // 按 MCP 协议发送 tools/call。
-        JsonNode response = restClient.post()
-                .uri("/mcp")
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(request)
-                .retrieve()
-                .body(JsonNode.class);
+        JsonNode response = invokeRpc(request);
 
         JsonNode result = response == null ? null : response.path("result").path("content");
         if (result == null || result.isMissingNode()) {
@@ -69,6 +65,51 @@ public class McpClientService {
 
         // 兼容旧格式（content 直接为字符串）。
         return result.asText("");
+    }
+
+    public List<Map<String, Object>> listRegistryTools() {
+        Map<String, Object> request = rpc("registry-list", "registry/tools/list", Map.of());
+        JsonNode response = invokeRpc(request);
+        JsonNode tools = response == null ? null : response.path("result").path("tools");
+        return asMapList(tools);
+    }
+
+    public Map<String, Object> previewImport(String remoteBaseUrl) {
+        Map<String, Object> request = rpc("registry-import-preview", "registry/tools/import.preview",
+                Map.of("remoteBaseUrl", remoteBaseUrl));
+        JsonNode response = invokeRpc(request);
+        return asMap(response.path("result"));
+    }
+
+    public Map<String, Object> commitImport(String remoteBaseUrl, String alias, List<String> toolNames) {
+        Map<String, Object> request = rpc("registry-import-commit", "registry/tools/import.commit",
+                Map.of(
+                        "remoteBaseUrl", remoteBaseUrl,
+                        "alias", alias,
+                        "toolNames", toolNames == null ? List.of() : toolNames
+                ));
+        JsonNode response = invokeRpc(request);
+        return asMap(response.path("result"));
+    }
+
+    public Map<String, Object> exportManifest(List<String> toolNames) {
+        Map<String, Object> request = rpc("registry-export", "registry/tools/export",
+                Map.of("toolNames", toolNames == null ? List.of() : toolNames));
+        JsonNode response = invokeRpc(request);
+        return asMap(response.path("result"));
+    }
+
+    public Map<String, Object> toggleTool(String name, boolean enabled) {
+        Map<String, Object> request = rpc("registry-toggle", "registry/tools/toggle",
+                Map.of("name", name, "enabled", enabled));
+        JsonNode response = invokeRpc(request);
+        return asMap(response.path("result"));
+    }
+
+    public Map<String, Object> deleteTool(String name) {
+        Map<String, Object> request = rpc("registry-delete", "registry/tools/delete", Map.of("name", name));
+        JsonNode response = invokeRpc(request);
+        return asMap(response.path("result"));
     }
 
     /**
@@ -114,5 +155,44 @@ public class McpClientService {
 
             initialized.set(true);
         }
+    }
+
+    private JsonNode invokeRpc(Map<String, Object> request) {
+        return restClient.post()
+                .uri("/mcp")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(request)
+                .retrieve()
+                .body(JsonNode.class);
+    }
+
+    private Map<String, Object> rpc(String id, String method, Map<String, Object> params) {
+        Map<String, Object> request = new HashMap<>();
+        request.put("jsonrpc", "2.0");
+        request.put("id", id);
+        request.put("method", method);
+        request.put("params", params);
+        return request;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> asMap(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return Map.of();
+        }
+        return new com.fasterxml.jackson.databind.ObjectMapper().convertValue(node, Map.class);
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> asMapList(JsonNode node) {
+        if (node == null || !node.isArray()) {
+            return List.of();
+        }
+        List<Map<String, Object>> output = new ArrayList<>();
+        com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        for (JsonNode item : node) {
+            output.add(mapper.convertValue(item, Map.class));
+        }
+        return output;
     }
 }

@@ -1,6 +1,7 @@
 package com.eureka.agenthub.controller;
 
 import com.eureka.agenthub.service.MemoryService;
+import com.eureka.agenthub.service.McpClientService;
 import com.eureka.agenthub.service.RagService;
 import jakarta.validation.constraints.NotBlank;
 import org.springframework.http.ResponseEntity;
@@ -8,6 +9,7 @@ import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -29,10 +31,14 @@ public class AdminController {
 
     private final RagService ragService;
     private final MemoryService memoryService;
+    private final McpClientService mcpClientService;
 
-    public AdminController(RagService ragService, MemoryService memoryService) {
+    public AdminController(RagService ragService,
+                           MemoryService memoryService,
+                           McpClientService mcpClientService) {
         this.ragService = ragService;
         this.memoryService = memoryService;
+        this.mcpClientService = mcpClientService;
     }
 
     @GetMapping("/rag/chunks")
@@ -112,6 +118,53 @@ public class AdminController {
     public ResponseEntity<Map<String, Object>> clearSession(@PathVariable String sessionId) {
         int deleted = memoryService.clearSession(sessionId);
         return ResponseEntity.ok(Map.of("cleared", deleted));
+    }
+
+    @GetMapping("/mcp/tools")
+    public ResponseEntity<List<Map<String, Object>>> listMcpTools() {
+        return ResponseEntity.ok(mcpClientService.listRegistryTools());
+    }
+
+    @PostMapping("/mcp/import/preview")
+    public ResponseEntity<Map<String, Object>> previewMcpImport(@RequestBody Map<String, Object> request) {
+        String remoteBaseUrl = String.valueOf(request.getOrDefault("remoteBaseUrl", ""));
+        if (remoteBaseUrl.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "remoteBaseUrl is required"));
+        }
+        return ResponseEntity.ok(mcpClientService.previewImport(remoteBaseUrl));
+    }
+
+    @PostMapping("/mcp/import/commit")
+    @SuppressWarnings("unchecked")
+    public ResponseEntity<Map<String, Object>> commitMcpImport(@RequestBody Map<String, Object> request) {
+        String remoteBaseUrl = String.valueOf(request.getOrDefault("remoteBaseUrl", ""));
+        String alias = String.valueOf(request.getOrDefault("alias", "imported"));
+        List<String> toolNames = request.get("toolNames") instanceof List<?> list
+                ? list.stream().map(String::valueOf).toList()
+                : List.of();
+
+        if (remoteBaseUrl.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "remoteBaseUrl is required"));
+        }
+
+        return ResponseEntity.ok(mcpClientService.commitImport(remoteBaseUrl, alias, toolNames));
+    }
+
+    @GetMapping("/mcp/export")
+    public ResponseEntity<Map<String, Object>> exportMcpTools(@RequestParam(required = false) List<String> names) {
+        return ResponseEntity.ok(mcpClientService.exportManifest(names));
+    }
+
+    @PutMapping("/mcp/tools/{name}/toggle")
+    public ResponseEntity<Map<String, Object>> toggleMcpTool(@PathVariable String name,
+                                                              @RequestBody Map<String, Object> request) {
+        boolean enabled = Boolean.parseBoolean(String.valueOf(request.getOrDefault("enabled", true)));
+        return ResponseEntity.ok(mcpClientService.toggleTool(name, enabled));
+    }
+
+    @DeleteMapping("/mcp/tools/{name}")
+    public ResponseEntity<Map<String, Object>> deleteMcpTool(@PathVariable String name) {
+        return ResponseEntity.ok(mcpClientService.deleteTool(name));
     }
 
     /**

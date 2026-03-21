@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -65,6 +66,57 @@ public class McpController {
             )));
         }
 
+        if ("registry/tools/list".equals(method)) {
+            return ResponseEntity.ok(ok(id, Map.of(
+                    "tools", toolRegistry.listRegistryItems()
+            )));
+        }
+
+        if ("registry/tools/import.preview".equals(method)) {
+            Map<String, Object> params = asMap(request.get("params"));
+            String remoteBaseUrl = String.valueOf(params.getOrDefault("remoteBaseUrl", ""));
+            if (remoteBaseUrl.isBlank()) {
+                return ResponseEntity.ok(error(id, -32602, "remoteBaseUrl is required"));
+            }
+            return ResponseEntity.ok(ok(id, toolRegistry.previewImport(remoteBaseUrl)));
+        }
+
+        if ("registry/tools/import.commit".equals(method)) {
+            Map<String, Object> params = asMap(request.get("params"));
+            String remoteBaseUrl = String.valueOf(params.getOrDefault("remoteBaseUrl", ""));
+            String alias = String.valueOf(params.getOrDefault("alias", "imported"));
+            List<String> toolNames = asStringList(params.get("toolNames"));
+            if (remoteBaseUrl.isBlank()) {
+                return ResponseEntity.ok(error(id, -32602, "remoteBaseUrl is required"));
+            }
+            return ResponseEntity.ok(ok(id, toolRegistry.commitImport(remoteBaseUrl, alias, toolNames)));
+        }
+
+        if ("registry/tools/export".equals(method)) {
+            Map<String, Object> params = asMap(request.get("params"));
+            List<String> toolNames = asStringList(params.get("toolNames"));
+            return ResponseEntity.ok(ok(id, toolRegistry.exportManifest(toolNames)));
+        }
+
+        if ("registry/tools/delete".equals(method)) {
+            Map<String, Object> params = asMap(request.get("params"));
+            String name = String.valueOf(params.getOrDefault("name", ""));
+            if (name.isBlank()) {
+                return ResponseEntity.ok(error(id, -32602, "name is required"));
+            }
+            return ResponseEntity.ok(ok(id, Map.of("deleted", toolRegistry.deleteImportedTool(name))));
+        }
+
+        if ("registry/tools/toggle".equals(method)) {
+            Map<String, Object> params = asMap(request.get("params"));
+            String name = String.valueOf(params.getOrDefault("name", ""));
+            boolean enabled = Boolean.parseBoolean(String.valueOf(params.getOrDefault("enabled", true)));
+            if (name.isBlank()) {
+                return ResponseEntity.ok(error(id, -32602, "name is required"));
+            }
+            return ResponseEntity.ok(ok(id, Map.of("updated", toolRegistry.toggleImportedTool(name, enabled))));
+        }
+
         if ("tools/call".equals(method)) {
             Map<String, Object> params = asMap(request.get("params"));
             String name = String.valueOf(params.get("name"));
@@ -98,6 +150,19 @@ public class McpController {
             return (Map<String, Object>) map;
         }
         return Map.of();
+    }
+
+    private List<String> asStringList(Object value) {
+        if (value instanceof List<?> list) {
+            List<String> output = new java.util.ArrayList<>();
+            for (Object item : list) {
+                if (item != null) {
+                    output.add(String.valueOf(item));
+                }
+            }
+            return output;
+        }
+        return List.of();
     }
 
     private Map<String, Object> ok(Object id, Map<String, Object> result) {
