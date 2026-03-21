@@ -61,7 +61,7 @@ public class ChatService {
         // 3) 严格直答跳过 RAG；知识库增强启用 RAG。
         List<RagHit> hits = directMode
                 ? Collections.emptyList()
-                : ragService.retrieve(userMessage, 3);
+                : ragService.retrieve(userMessage, 5);
 
         List<String> toolCalls = new ArrayList<>();
         List<String> imageUrls = new ArrayList<>();
@@ -225,7 +225,7 @@ public class ChatService {
                         .append(" score=")
                         .append(String.format(Locale.ROOT, "%.4f", hit.score()))
                         .append("\n")
-                        .append(hit.content())
+                        .append(limitLength(hit.content(), 900))
                         .append("\n\n");
             }
         }
@@ -237,5 +237,15 @@ public class ChatService {
 
         sb.append("Please provide a concise and actionable answer.");
         return sb.toString();
+    }
+
+    private String limitLength(String text, int maxLen) {
+        if (text == null) {
+            return "";
+        }
+        if (text.length() <= maxLen) {
+            return text;
+        }
+        return text.substring(0, maxLen) + "...";
     }
 }

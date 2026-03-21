@@ -25,9 +25,12 @@ app:
     embedding-provider: ${RAG_EMBED_PROVIDER:openai}
     embedding-model: ${RAG_EMBED_MODEL:embedding-2}
     embedding-dimension: ${RAG_EMBED_DIM:1024}
-    chunk-size: ${RAG_CHUNK_SIZE:500}
-    chunk-overlap: ${RAG_CHUNK_OVERLAP:80}
-    retrieve-top-k: ${RAG_RETRIEVE_TOPK:5}
+    chunk-size: ${RAG_CHUNK_SIZE:700}
+    chunk-overlap: ${RAG_CHUNK_OVERLAP:120}
+    chunk-min-size: ${RAG_CHUNK_MIN_SIZE:120}
+    recall-top-k: ${RAG_RECALL_TOPK:20}
+    final-top-k: ${RAG_FINAL_TOPK:5}
+    min-score: ${RAG_MIN_SCORE:0.35}
   ollama:
     base-url: http://localhost:${OLLAMA_PORT:11434}
     chat-model: ${OLLAMA_CHAT_MODEL:qwen3:4b}

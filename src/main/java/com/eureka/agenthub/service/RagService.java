@@ -7,7 +7,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
@@ -71,8 +70,12 @@ public class RagService {
     }
 
     public List<RagHit> retrieve(String query, int topK) {
-        int configuredTopK = Math.max(1, appProperties.getRag().getRetrieveTopK());
-        int effectiveTopK = Math.max(topK, configuredTopK);
+        // 两阶段检索：先扩大召回，再精排截断，兼顾召回率和准确率。
+        int recallTopK = Math.max(1, appProperties.getRag().getRecallTopK());
+        int finalTopK = Math.max(1, appProperties.getRag().getFinalTopK());
+        int effectiveRecallTopK = Math.max(Math.max(topK, finalTopK), recallTopK);
+        double minScore = appProperties.getRag().getMinScore();
+
         String vector = toVectorLiteral(modelClientService.embed(query));
         // 提高 ivfflat 召回质量，避免小数据量下漏召回。
         jdbcTemplate.execute("SET ivfflat.probes = 100");
@@ -86,28 +89,35 @@ public class RagService {
                 ),
                 vector,
                 vector,
-                effectiveTopK
+                effectiveRecallTopK
         );
         if (!hits.isEmpty()) {
-            return hits;
+            // 对候选结果进行规则精排，并过滤低置信度命中，减少幻觉注入。
+            List<RagHit> reranked = RagRetrievalUtils.rerank(query, hits, finalTopK);
+            return reranked.stream().filter(h -> h.score() >= minScore).toList();
         }
 
         // 兜底：关闭 indexscan 做顺序扫描，尽量保证能查到结果。
         jdbcTemplate.execute("SET enable_indexscan = off");
-        List<RagHit> fallbackHits = jdbcTemplate.query(
-                "SELECT source, content, 1 - (embedding <=> ?::vector) AS score " +
-                        "FROM rag_chunks ORDER BY embedding <=> ?::vector LIMIT ?",
-                (rs, rowNum) -> new RagHit(
-                        rs.getString("source"),
-                        rs.getString("content"),
-                        rs.getDouble("score")
-                ),
-                vector,
-                vector,
-                effectiveTopK
-        );
-        jdbcTemplate.execute("SET enable_indexscan = on");
-        return fallbackHits;
+        try {
+            List<RagHit> fallbackHits = jdbcTemplate.query(
+                    "SELECT source, content, 1 - (embedding <=> ?::vector) AS score " +
+                            "FROM rag_chunks ORDER BY embedding <=> ?::vector LIMIT ?",
+                    (rs, rowNum) -> new RagHit(
+                            rs.getString("source"),
+                            rs.getString("content"),
+                            rs.getDouble("score")
+                    ),
+                    vector,
+                    vector,
+                    effectiveRecallTopK
+            );
+            // 顺序扫描兜底也走同一套精排和阈值规则，保持行为一致。
+            List<RagHit> reranked = RagRetrievalUtils.rerank(query, fallbackHits, finalTopK);
+            return reranked.stream().filter(h -> h.score() >= minScore).toList();
+        } finally {
+            jdbcTemplate.execute("SET enable_indexscan = on");
+        }
     }
 
     public List<RagChunkRow> listChunks(String source, int limit) {
@@ -185,20 +195,8 @@ public class RagService {
     }
 
     private List<String> splitText(String text, int maxChunkSize, int overlap) {
-        List<String> chunks = new ArrayList<>();
-        String normalized = text.replace("\r\n", "\n").trim();
-        if (normalized.isEmpty()) {
-            return chunks;
-        }
-        int safeOverlap = Math.min(Math.max(0, overlap), Math.max(0, maxChunkSize - 1));
-        int step = Math.max(1, maxChunkSize - safeOverlap);
-        int start = 0;
-        while (start < normalized.length()) {
-            int end = Math.min(start + maxChunkSize, normalized.length());
-            chunks.add(normalized.substring(start, end));
-            start += step;
-        }
-        return chunks;
+        int minSize = Math.max(50, appProperties.getRag().getChunkMinSize());
+        return RagRetrievalUtils.splitRecursively(text, maxChunkSize, minSize, overlap);
     }
 
     private String toVectorLiteral(List<Double> embedding) {

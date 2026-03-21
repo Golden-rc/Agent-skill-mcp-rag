@@ -149,8 +149,14 @@ public class AppProperties {
         private int chunkSize = 500;
         /** Overlap size between chunks. */
         private int chunkOverlap = 80;
-        /** Default retrieve topK. */
-        private int retrieveTopK = 5;
+        /** Minimum chunk size before merge. */
+        private int chunkMinSize = 120;
+        /** Candidate recall size before rerank. */
+        private int recallTopK = 20;
+        /** Final topK after rerank. */
+        private int finalTopK = 5;
+        /** Minimal rerank score to keep in context. */
+        private double minScore = 0.35;
 
         public String getEmbeddingProvider() {
             return embeddingProvider;
@@ -192,12 +198,36 @@ public class AppProperties {
             this.chunkOverlap = chunkOverlap;
         }
 
-        public int getRetrieveTopK() {
-            return retrieveTopK;
+        public int getChunkMinSize() {
+            return chunkMinSize;
         }
 
-        public void setRetrieveTopK(int retrieveTopK) {
-            this.retrieveTopK = retrieveTopK;
+        public void setChunkMinSize(int chunkMinSize) {
+            this.chunkMinSize = chunkMinSize;
+        }
+
+        public int getRecallTopK() {
+            return recallTopK;
+        }
+
+        public void setRecallTopK(int recallTopK) {
+            this.recallTopK = recallTopK;
+        }
+
+        public int getFinalTopK() {
+            return finalTopK;
+        }
+
+        public void setFinalTopK(int finalTopK) {
+            this.finalTopK = finalTopK;
+        }
+
+        public double getMinScore() {
+            return minScore;
+        }
+
+        public void setMinScore(double minScore) {
+            this.minScore = minScore;
         }
     }
 }

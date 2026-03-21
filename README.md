@@ -138,6 +138,12 @@ For BigModel gateway (`https://open.bigmodel.cn/api/paas/v4`), use:
 RAG_EMBED_PROVIDER=openai
 RAG_EMBED_MODEL=embedding-2
 RAG_EMBED_DIM=1024
+RAG_CHUNK_SIZE=700
+RAG_CHUNK_OVERLAP=120
+RAG_CHUNK_MIN_SIZE=120
+RAG_RECALL_TOPK=20
+RAG_FINAL_TOPK=5
+RAG_MIN_SCORE=0.35
 ```
 
 `embedding-3` is 2048-dim, but pgvector `ivfflat` index cannot index vectors above 2000 dimensions.
