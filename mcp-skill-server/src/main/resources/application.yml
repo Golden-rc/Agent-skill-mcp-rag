@@ -1,2 +1,5 @@
 server:
   port: 8090
+
+app:
+  public-base-url: ${MCP_PUBLIC_BASE_URL:http://localhost:8090}

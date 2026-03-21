@@ -21,6 +21,7 @@ import java.util.regex.Pattern;
 public class ChatService {
 
     private static final Pattern PURE_MATH_PATTERN = Pattern.compile("^[0-9\\s+\\-*/().=]+$");
+    private static final Pattern PNG_URL_PATTERN = Pattern.compile("(https?://\\S+\\.png)");
 
     private final ProviderRouter providerRouter;
     private final MemoryService memoryService;
@@ -45,8 +46,11 @@ public class ChatService {
         String provider = providerRouter.pickProvider(request.getProvider());
         String userMessage = request.getMessage();
         String mode = normalizeMode(request.getMode());
+        boolean screenshotIntent = isScreenshotIntent(userMessage);
         ModeDecision modeDecision = "auto".equals(mode)
-                ? classifyAutoMode(provider, userMessage)
+                ? (screenshotIntent
+                ? new ModeDecision("direct", "rule-screenshot-tool")
+                : classifyAutoMode(provider, userMessage))
                 : new ModeDecision(mode, "manual-" + mode);
         String effectiveMode = modeDecision.mode();
         boolean directMode = "direct".equals(effectiveMode);
@@ -60,9 +64,12 @@ public class ChatService {
                 : ragService.retrieve(userMessage, 3);
 
         List<String> toolCalls = new ArrayList<>();
+        List<String> imageUrls = new ArrayList<>();
 
         // 4) 简单意图路由，按关键词触发 MCP 工具。
-        String toolResult = directMode ? "" : routeToolIfNeeded(userMessage, toolCalls);
+        ToolRouteResult toolRouteResult = (directMode && !screenshotIntent)
+                ? ToolRouteResult.empty()
+                : routeToolIfNeeded(userMessage, toolCalls, imageUrls);
 
         // 5) 组装最终 prompt。
         List<ChatMessage> prompt = new ArrayList<>();
@@ -71,7 +78,7 @@ public class ChatService {
                         "If retrieval context exists, cite source names in the answer. " +
                         "For simple math or short factual questions, answer directly and do not force RAG context."));
         prompt.addAll(history);
-        prompt.add(new ChatMessage("user", buildUserPrompt(userMessage, hits, toolResult)));
+        prompt.add(new ChatMessage("user", buildUserPrompt(userMessage, hits, toolRouteResult.promptContext())));
 
         // 6) 调用模型生成回答。
         String answer = modelClientService.chat(provider, prompt);
@@ -80,7 +87,7 @@ public class ChatService {
         memoryService.append(request.getSessionId(), new ChatMessage("user", userMessage));
         memoryService.append(request.getSessionId(), new ChatMessage("assistant", answer));
 
-        return new ChatResponse(answer, provider, hits, toolCalls, effectiveMode, modeDecision.reason());
+        return new ChatResponse(answer, provider, hits, toolCalls, imageUrls, effectiveMode, modeDecision.reason());
     }
 
     private ModeDecision classifyAutoMode(String provider, String message) {
@@ -146,21 +153,61 @@ public class ChatService {
                 || normalized.contains("agent");
     }
 
+    private boolean isScreenshotIntent(String message) {
+        if (message == null || message.isBlank()) {
+            return false;
+        }
+        String normalized = message.toLowerCase(Locale.ROOT);
+        return normalized.contains("截图")
+                || normalized.contains("截屏")
+                || normalized.contains("screenshot")
+                || normalized.contains("screen shot")
+                || normalized.contains("screen capture")
+                || normalized.contains("屏幕");
+    }
+
     private record ModeDecision(String mode, String reason) {
     }
 
-    private String routeToolIfNeeded(String message, List<String> toolCalls) {
+    private ToolRouteResult routeToolIfNeeded(String message, List<String> toolCalls, List<String> imageUrls) {
         // 当前为轻量规则路由，可后续替换成意图分类器。
         String normalized = message.toLowerCase(Locale.ROOT);
+        if (isScreenshotIntent(message)) {
+            toolCalls.add("take_screenshot");
+            String toolOutput = mcpClientService.callTool("take_screenshot", message);
+            String imageUrl = extractPngUrl(toolOutput);
+            if (!imageUrl.isBlank()) {
+                imageUrls.add(imageUrl);
+                return new ToolRouteResult("Screenshot captured successfully.");
+            }
+            return new ToolRouteResult(toolOutput);
+        }
         if (normalized.contains("todo") || message.contains("待办") || message.contains("行动项")) {
             toolCalls.add("extract_todos");
-            return mcpClientService.callTool("extract_todos", message);
+            return new ToolRouteResult(mcpClientService.callTool("extract_todos", message));
         }
         if (normalized.contains("summary") || message.contains("总结") || message.contains("概括")) {
             toolCalls.add("summarize");
-            return mcpClientService.callTool("summarize", message);
+            return new ToolRouteResult(mcpClientService.callTool("summarize", message));
+        }
+        return ToolRouteResult.empty();
+    }
+
+    private String extractPngUrl(String toolOutput) {
+        if (toolOutput == null || toolOutput.isBlank()) {
+            return "";
+        }
+        java.util.regex.Matcher matcher = PNG_URL_PATTERN.matcher(toolOutput);
+        if (matcher.find()) {
+            return matcher.group(1);
         }
         return "";
+    }
+
+    private record ToolRouteResult(String promptContext) {
+        private static ToolRouteResult empty() {
+            return new ToolRouteResult("");
+        }
     }
 
     private String buildUserPrompt(String userInput, List<RagHit> hits, String toolResult) {

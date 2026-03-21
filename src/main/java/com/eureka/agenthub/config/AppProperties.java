@@ -14,6 +14,7 @@ public class AppProperties {
     private final Openai openai = new Openai();
     private final Mcp mcp = new Mcp();
     private final Memory memory = new Memory();
+    private final Rag rag = new Rag();
 
     public Ollama getOllama() {
         return ollama;
@@ -29,6 +30,10 @@ public class AppProperties {
 
     public Memory getMemory() {
         return memory;
+    }
+
+    public Rag getRag() {
+        return rag;
     }
 
     public static class Ollama {
@@ -130,6 +135,69 @@ public class AppProperties {
 
         public void setHistoryTtlHours(int historyTtlHours) {
             this.historyTtlHours = historyTtlHours;
+        }
+    }
+
+    public static class Rag {
+        /** Embedding provider: openai / ollama. */
+        private String embeddingProvider = "openai";
+        /** Embedding model name for selected provider. */
+        private String embeddingModel = "embedding-2";
+        /** Embedding vector dimension used by pgvector schema. */
+        private int embeddingDimension = 1024;
+        /** Default chunk size for ingest. */
+        private int chunkSize = 500;
+        /** Overlap size between chunks. */
+        private int chunkOverlap = 80;
+        /** Default retrieve topK. */
+        private int retrieveTopK = 5;
+
+        public String getEmbeddingProvider() {
+            return embeddingProvider;
+        }
+
+        public void setEmbeddingProvider(String embeddingProvider) {
+            this.embeddingProvider = embeddingProvider;
+        }
+
+        public String getEmbeddingModel() {
+            return embeddingModel;
+        }
+
+        public void setEmbeddingModel(String embeddingModel) {
+            this.embeddingModel = embeddingModel;
+        }
+
+        public int getEmbeddingDimension() {
+            return embeddingDimension;
+        }
+
+        public void setEmbeddingDimension(int embeddingDimension) {
+            this.embeddingDimension = embeddingDimension;
+        }
+
+        public int getChunkSize() {
+            return chunkSize;
+        }
+
+        public void setChunkSize(int chunkSize) {
+            this.chunkSize = chunkSize;
+        }
+
+        public int getChunkOverlap() {
+            return chunkOverlap;
+        }
+
+        public void setChunkOverlap(int chunkOverlap) {
+            this.chunkOverlap = chunkOverlap;
+        }
+
+        public int getRetrieveTopK() {
+            return retrieveTopK;
+        }
+
+        public void setRetrieveTopK(int retrieveTopK) {
+            this.retrieveTopK = retrieveTopK;
         }
     }
 }

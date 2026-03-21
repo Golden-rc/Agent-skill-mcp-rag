@@ -130,6 +130,27 @@ Any OpenAI-compatible gateway can be used by changing `OPENAI_BASE_URL`.
 
 Use `provider=openai` (or `provider=auto` with non-empty `OPENAI_API_KEY`) when calling `/chat`.
 
+## RAG embedding config (BigModel/OpenAI-compatible)
+
+For BigModel gateway (`https://open.bigmodel.cn/api/paas/v4`), use:
+
+```bash
+RAG_EMBED_PROVIDER=openai
+RAG_EMBED_MODEL=embedding-2
+RAG_EMBED_DIM=1024
+```
+
+`embedding-3` is 2048-dim, but pgvector `ivfflat` index cannot index vectors above 2000 dimensions.
+If you need `embedding-3`, switch index strategy (e.g. HNSW) first.
+
+When switching embedding model/dimension, rebuild RAG vectors:
+
+```sql
+TRUNCATE TABLE rag_chunks;
+```
+
+Then re-run `/rag/ingest` or `/rag/ingest/file` to re-embed all documents.
+
 ## Troubleshooting
 
 - If Ollama returns memory errors for `qwen3:4b`, use a smaller model:

@@ -1,6 +1,7 @@
 package com.eureka.mcp.tool;
 
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Value;
 
 import javax.imageio.ImageIO;
 import java.awt.AWTException;
@@ -24,6 +25,12 @@ import java.util.Map;
  */
 @Component
 public class ScreenshotTool implements McpTool {
+
+    private final String publicBaseUrl;
+
+    public ScreenshotTool(@Value("${app.public-base-url:http://localhost:8090}") String publicBaseUrl) {
+        this.publicBaseUrl = publicBaseUrl;
+    }
 
     @Override
     public String name() {
@@ -50,10 +57,6 @@ public class ScreenshotTool implements McpTool {
 
     @Override
     public String execute(Map<String, Object> arguments) {
-        if (GraphicsEnvironment.isHeadless()) {
-            return "截图失败：当前环境是无头模式，无法捕获屏幕";
-        }
-
         String fileName = String.valueOf(arguments.getOrDefault("fileName", "")).trim();
         if (fileName.isEmpty()) {
             fileName = "screenshot-" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")) + ".png";
@@ -68,13 +71,40 @@ public class ScreenshotTool implements McpTool {
         try {
             Files.createDirectories(outDir);
 
-            Dimension screenSize = Toolkit.getDefaultToolkit().getScreenSize();
-            Rectangle captureArea = new Rectangle(screenSize);
-            BufferedImage image = new Robot().createScreenCapture(captureArea);
-            ImageIO.write(image, "png", new File(outPath.toString()));
-            return "截图成功: " + outPath.toAbsolutePath();
-        } catch (IOException | AWTException e) {
+            if (isMacOs()) {
+                captureByMacCommand(outPath);
+            } else {
+                if (GraphicsEnvironment.isHeadless()) {
+                    return "截图失败：当前环境是无头模式，无法捕获屏幕";
+                }
+                Dimension screenSize = Toolkit.getDefaultToolkit().getScreenSize();
+                Rectangle captureArea = new Rectangle(screenSize);
+                BufferedImage image = new Robot().createScreenCapture(captureArea);
+                ImageIO.write(image, "png", new File(outPath.toString()));
+            }
+
+            String base = publicBaseUrl.endsWith("/")
+                    ? publicBaseUrl.substring(0, publicBaseUrl.length() - 1)
+                    : publicBaseUrl;
+            String imageUrl = base + "/assets/screenshots/" + fileName;
+            return "截图成功: " + imageUrl;
+        } catch (IOException | AWTException | InterruptedException e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
             return "截图失败: " + e.getMessage();
+        }
+    }
+
+    private boolean isMacOs() {
+        return System.getProperty("os.name", "").toLowerCase().contains("mac");
+    }
+
+    private void captureByMacCommand(Path outPath) throws IOException, InterruptedException {
+        Process process = new ProcessBuilder("screencapture", "-x", outPath.toString()).start();
+        int code = process.waitFor();
+        if (code != 0 || !Files.exists(outPath)) {
+            throw new IOException("screencapture command failed, exit=" + code);
         }
     }
 }

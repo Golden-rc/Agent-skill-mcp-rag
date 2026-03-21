@@ -1,6 +1,8 @@
 package com.eureka.agenthub.service;
 
+import com.eureka.agenthub.config.AppProperties;
 import com.eureka.agenthub.model.RagHit;
+import jakarta.annotation.PostConstruct;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -19,15 +21,38 @@ public class RagService {
 
     private final JdbcTemplate jdbcTemplate;
     private final ModelClientService modelClientService;
+    private final AppProperties appProperties;
 
-    public RagService(JdbcTemplate jdbcTemplate, ModelClientService modelClientService) {
+    public RagService(JdbcTemplate jdbcTemplate,
+                      ModelClientService modelClientService,
+                      AppProperties appProperties) {
         this.jdbcTemplate = jdbcTemplate;
         this.modelClientService = modelClientService;
+        this.appProperties = appProperties;
+    }
+
+    @PostConstruct
+    public void validateEmbeddingDimension() {
+        int configuredDimension = appProperties.getRag().getEmbeddingDimension();
+        if (configuredDimension <= 0) {
+            throw new IllegalStateException("app.rag.embedding-dimension must be positive");
+        }
+        Integer existingDimension = jdbcTemplate.query(
+                        "SELECT vector_dims(embedding) FROM rag_chunks LIMIT 1",
+                        rs -> rs.next() ? rs.getInt(1) : null
+                );
+        if (existingDimension != null && existingDimension != configuredDimension) {
+            throw new IllegalStateException("rag embedding dimension mismatch, db="
+                    + existingDimension + " config=" + configuredDimension
+                    + ". Please rebuild rag_chunks with new embedding model.");
+        }
     }
 
     public int ingest(String source, String text) {
         // 简单按定长切块，保证单块 token 大小可控。
-        List<String> chunks = splitText(text, 500);
+        int chunkSize = Math.max(100, appProperties.getRag().getChunkSize());
+        int chunkOverlap = Math.max(0, appProperties.getRag().getChunkOverlap());
+        List<String> chunks = splitText(text, chunkSize, chunkOverlap);
         int inserted = 0;
         for (String chunk : chunks) {
             if (!StringUtils.hasText(chunk)) {
@@ -46,6 +71,8 @@ public class RagService {
     }
 
     public List<RagHit> retrieve(String query, int topK) {
+        int configuredTopK = Math.max(1, appProperties.getRag().getRetrieveTopK());
+        int effectiveTopK = Math.max(topK, configuredTopK);
         String vector = toVectorLiteral(modelClientService.embed(query));
         // 提高 ivfflat 召回质量，避免小数据量下漏召回。
         jdbcTemplate.execute("SET ivfflat.probes = 100");
@@ -59,7 +86,7 @@ public class RagService {
                 ),
                 vector,
                 vector,
-                topK
+                effectiveTopK
         );
         if (!hits.isEmpty()) {
             return hits;
@@ -77,7 +104,7 @@ public class RagService {
                 ),
                 vector,
                 vector,
-                topK
+                effectiveTopK
         );
         jdbcTemplate.execute("SET enable_indexscan = on");
         return fallbackHits;
@@ -157,15 +184,19 @@ public class RagService {
     public record RagChunkRow(long id, String source, String content, String createdAt) {
     }
 
-    private List<String> splitText(String text, int maxChunkSize) {
-        // 该实现是最小可用方案，后续可替换为按段落/语义切分。
+    private List<String> splitText(String text, int maxChunkSize, int overlap) {
         List<String> chunks = new ArrayList<>();
         String normalized = text.replace("\r\n", "\n").trim();
+        if (normalized.isEmpty()) {
+            return chunks;
+        }
+        int safeOverlap = Math.min(Math.max(0, overlap), Math.max(0, maxChunkSize - 1));
+        int step = Math.max(1, maxChunkSize - safeOverlap);
         int start = 0;
         while (start < normalized.length()) {
             int end = Math.min(start + maxChunkSize, normalized.length());
             chunks.add(normalized.substring(start, end));
-            start = end;
+            start += step;
         }
         return chunks;
     }

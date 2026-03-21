@@ -12,6 +12,8 @@ public record ChatResponse(String answer,
                            List<RagHit> citations,
                            // 本次触发的 MCP 工具名。
                            List<String> toolCalls,
+                           // 工具产出的可展示图片 URL。
+                           List<String> imageUrls,
                            // 本次实际回答模式：direct / rag。
                            String modeUsed,
                            // 模式决策来源，便于前端调试。

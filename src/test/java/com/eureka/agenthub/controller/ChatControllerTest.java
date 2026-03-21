@@ -38,6 +38,7 @@ class ChatControllerTest {
                 "openai",
                 List.of(new RagHit("kb", "doc chunk", 0.9)),
                 List.of("extract_todos"),
+                List.of(),
                 "rag",
                 "manual-rag"
         );

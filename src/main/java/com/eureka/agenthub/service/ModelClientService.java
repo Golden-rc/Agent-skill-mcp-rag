@@ -28,9 +28,26 @@ public class ModelClientService {
     private final EmbeddingModel ollamaEmbeddingModel;
     private final EmbeddingModel openAiEmbeddingModel;
     private final AppProperties appProperties;
+    private final String ragEmbeddingProvider;
+    private final int ragEmbeddingDimension;
 
     public ModelClientService(AppProperties appProperties) {
         this.appProperties = appProperties;
+        this.ragEmbeddingProvider = normalizeEmbeddingProvider(appProperties.getRag().getEmbeddingProvider());
+        this.ragEmbeddingDimension = appProperties.getRag().getEmbeddingDimension();
+
+        if ("openai".equals(this.ragEmbeddingProvider)
+                && !StringUtils.hasText(appProperties.getOpenai().getApiKey())) {
+            throw new IllegalStateException("RAG embedding provider is openai but OPENAI_API_KEY is empty");
+        }
+
+        String ragEmbeddingModel = appProperties.getRag().getEmbeddingModel();
+        String openAiEmbeddingModelName = StringUtils.hasText(ragEmbeddingModel)
+                ? ragEmbeddingModel
+                : "text-embedding-3-small";
+        String ollamaEmbeddingModelName = StringUtils.hasText(ragEmbeddingModel)
+                ? ragEmbeddingModel
+                : appProperties.getOllama().getEmbeddingModel();
 
         this.ollamaChatModel = OllamaChatModel.builder()
                 .baseUrl(appProperties.getOllama().getBaseUrl())
@@ -47,13 +64,13 @@ public class ModelClientService {
 
         this.ollamaEmbeddingModel = OllamaEmbeddingModel.builder()
                 .baseUrl(appProperties.getOllama().getBaseUrl())
-                .modelName(appProperties.getOllama().getEmbeddingModel())
+                .modelName(ollamaEmbeddingModelName)
                 .build();
 
         this.openAiEmbeddingModel = OpenAiEmbeddingModel.builder()
                 .baseUrl(appProperties.getOpenai().getBaseUrl())
                 .apiKey(appProperties.getOpenai().getApiKey())
-                .modelName("text-embedding-3-small")
+                .modelName(openAiEmbeddingModelName)
                 .build();
     }
 
@@ -101,20 +118,32 @@ public class ModelClientService {
      */
     public List<Double> embed(String text) {
         try {
-            EmbeddingModel model = shouldUseOpenAiEmbedding() ? openAiEmbeddingModel : ollamaEmbeddingModel;
+            EmbeddingModel model = switch (ragEmbeddingProvider) {
+                case "openai" -> {
+                    yield openAiEmbeddingModel;
+                }
+                case "ollama" -> ollamaEmbeddingModel;
+                default -> throw new IllegalArgumentException("unsupported rag embedding provider: " + ragEmbeddingProvider);
+            };
             float[] vector = model.embed(text).content().vector();
+            if (vector.length != ragEmbeddingDimension) {
+                throw new IllegalStateException("embedding dimension mismatch, expected="
+                        + ragEmbeddingDimension + " actual=" + vector.length);
+            }
             List<Double> result = new ArrayList<>(vector.length);
             for (float v : vector) {
                 result.add((double) v);
             }
             return result;
-        } catch (Exception ignored) {
-            return deterministicEmbedding(text, 768);
+        } catch (Exception e) {
+            String rootMessage = rootCauseMessage(e);
+            if (isModelNotFoundError(rootMessage)) {
+                throw new IllegalArgumentException("embedding model not found: "
+                        + appProperties.getRag().getEmbeddingModel()
+                        + ". Please set RAG_EMBED_MODEL to a valid model for your OPENAI_BASE_URL.", e);
+            }
+            throw new IllegalStateException("failed to generate embedding: " + rootMessage, e);
         }
-    }
-
-    private boolean shouldUseOpenAiEmbedding() {
-        return StringUtils.hasText(appProperties.getOpenai().getApiKey());
     }
 
     private String toPrompt(List<ChatMessage> messages) {
@@ -139,17 +168,31 @@ public class ModelClientService {
         return "当前模型服务暂不可用，已使用降级回答。\n建议行动：\n1. 明确目标和验收标准\n2. 先搭建RAG与MCP最小闭环\n3. 加入Redis记忆与安全策略\n\n你的问题是：" + userInput;
     }
 
-    private List<Double> deterministicEmbedding(String text, int dimension) {
-        List<Double> vector = new ArrayList<>(dimension);
-        long seed = 1125899906842597L;
-        for (int i = 0; i < text.length(); i++) {
-            seed = 31 * seed + text.charAt(i);
+    private String normalizeEmbeddingProvider(String provider) {
+        String normalized = provider == null ? "openai" : provider.trim().toLowerCase(Locale.ROOT);
+        if (!"openai".equals(normalized) && !"ollama".equals(normalized)) {
+            throw new IllegalArgumentException("unsupported rag embedding provider: " + provider);
         }
-        for (int i = 0; i < dimension; i++) {
-            long value = seed ^ (seed << 13) ^ (seed >>> 7) ^ (seed << 17) ^ i;
-            double normalized = ((value & 0x7fffffffL) % 2000) / 1000.0 - 1.0;
-            vector.add(normalized);
+        return normalized;
+    }
+
+    private String rootCauseMessage(Throwable throwable) {
+        Throwable current = throwable;
+        while (current.getCause() != null) {
+            current = current.getCause();
         }
-        return vector;
+        String message = current.getMessage();
+        return StringUtils.hasText(message) ? message : current.getClass().getSimpleName();
+    }
+
+    private boolean isModelNotFoundError(String message) {
+        if (!StringUtils.hasText(message)) {
+            return false;
+        }
+        String normalized = message.toLowerCase(Locale.ROOT);
+        return normalized.contains("模型不存在")
+                || normalized.contains("model not found")
+                || normalized.contains("model does not exist")
+                || normalized.contains("code\":\"1211\"");
     }
 }

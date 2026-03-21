@@ -10,6 +10,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -61,5 +62,23 @@ class IngestControllerTest {
                                 """))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("request validation failed"));
+    }
+
+    @Test
+    void shouldReturnBadRequestWhenEmbeddingModelInvalid() throws Exception {
+        doThrow(new IllegalArgumentException("embedding model not found: text-embedding-3-small"))
+                .when(ragService)
+                .ingest(eq("internship-guide"), eq("demo text"));
+
+        mockMvc.perform(post("/rag/ingest")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "source":"internship-guide",
+                                  "text":"demo text"
+                                }
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("embedding model not found: text-embedding-3-small"));
     }
 }

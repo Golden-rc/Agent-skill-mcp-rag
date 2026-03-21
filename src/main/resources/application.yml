@@ -21,6 +21,13 @@ spring:
       max-request-size: 20MB
 
 app:
+  rag:
+    embedding-provider: ${RAG_EMBED_PROVIDER:openai}
+    embedding-model: ${RAG_EMBED_MODEL:embedding-2}
+    embedding-dimension: ${RAG_EMBED_DIM:1024}
+    chunk-size: ${RAG_CHUNK_SIZE:500}
+    chunk-overlap: ${RAG_CHUNK_OVERLAP:80}
+    retrieve-top-k: ${RAG_RETRIEVE_TOPK:5}
   ollama:
     base-url: http://localhost:${OLLAMA_PORT:11434}
     chat-model: ${OLLAMA_CHAT_MODEL:qwen3:4b}
