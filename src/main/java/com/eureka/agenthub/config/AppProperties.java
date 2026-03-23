@@ -122,9 +122,11 @@ public class AppProperties {
 
     public static class Memory {
         /** Redis 中保留的最大历史消息条数。 */
-        private int maxHistoryMessages = 10;
+        private int maxHistoryMessages = 50;
         /** 会话历史 TTL（小时）。 */
-        private int historyTtlHours = 24;
+        private int historyTtlHours = 168;
+        /** direct 模式下参与上下文的最近消息条数。 */
+        private int directHistoryMessages = 8;
 
         public int getMaxHistoryMessages() {
             return maxHistoryMessages;
@@ -140,6 +142,14 @@ public class AppProperties {
 
         public void setHistoryTtlHours(int historyTtlHours) {
             this.historyTtlHours = historyTtlHours;
+        }
+
+        public int getDirectHistoryMessages() {
+            return directHistoryMessages;
+        }
+
+        public void setDirectHistoryMessages(int directHistoryMessages) {
+            this.directHistoryMessages = directHistoryMessages;
         }
     }
 

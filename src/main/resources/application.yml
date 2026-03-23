@@ -47,5 +47,6 @@ app:
   mcp:
     base-url: ${MCP_BASE_URL:http://localhost:8090}
   memory:
-    max-history-messages: 10
-    history-ttl-hours: 24
+    max-history-messages: ${MEMORY_MAX_HISTORY_MESSAGES:50}
+    history-ttl-hours: ${MEMORY_HISTORY_TTL_HOURS:168}
+    direct-history-messages: ${MEMORY_DIRECT_HISTORY_MESSAGES:8}

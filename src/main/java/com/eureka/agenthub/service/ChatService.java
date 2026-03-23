@@ -68,8 +68,14 @@ public class ChatService {
         String effectiveMode = modeDecision.mode();
         boolean directMode = "direct".equals(effectiveMode);
 
-        // 2) 严格直答模式不带历史，避免被旧上下文污染。
-        List<ChatMessage> history = directMode ? Collections.emptyList() : memoryService.loadHistory(request.getSessionId());
+        // 2) 两种模式都支持会话记忆。
+        // - rag: 使用完整历史窗口。
+        // - direct: 使用最近 N 条，既保留上下文连续性，又降低旧上下文污染。
+        List<ChatMessage> history = memoryService.loadHistory(request.getSessionId());
+        if (directMode) {
+            int directHistoryLimit = Math.max(0, appProperties.getMemory().getDirectHistoryMessages());
+            history = takeLastMessages(history, directHistoryLimit);
+        }
 
         // 3) 严格直答跳过 RAG；知识库增强启用 RAG。
         List<RagHit> hits = directMode
@@ -356,6 +362,16 @@ public class ChatService {
             return text;
         }
         return text.substring(0, maxLen) + "...";
+    }
+
+    private List<ChatMessage> takeLastMessages(List<ChatMessage> messages, int limit) {
+        if (messages == null || messages.isEmpty() || limit <= 0) {
+            return Collections.emptyList();
+        }
+        if (messages.size() <= limit) {
+            return messages;
+        }
+        return new ArrayList<>(messages.subList(messages.size() - limit, messages.size()));
     }
 
     private List<RagHit> toResponseCitations(List<RagHit> hits) {

@@ -155,6 +155,14 @@ CHAT_TOOL_CALLING_OPENAI_ONLY=true
 CHAT_MAX_TOOL_ROUNDS=3
 ```
 
+Memory (both `direct` and `rag` modes use session history):
+
+```bash
+MEMORY_MAX_HISTORY_MESSAGES=50
+MEMORY_HISTORY_TTL_HOURS=168
+MEMORY_DIRECT_HISTORY_MESSAGES=8
+```
+
 `embedding-3` is 2048-dim, but pgvector `ivfflat` index cannot index vectors above 2000 dimensions.
 If you need `embedding-3`, switch index strategy (e.g. HNSW) first.
 
