@@ -2,18 +2,28 @@ package com.eureka.agenthub.service;
 
 import com.eureka.agenthub.config.AppProperties;
 import com.eureka.agenthub.model.ChatMessage;
+import com.eureka.agenthub.model.ToolCallRequest;
+import com.eureka.agenthub.model.ToolChatResult;
+import com.eureka.agenthub.model.ToolDefinition;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.ollama.OllamaChatModel;
 import dev.langchain4j.model.ollama.OllamaEmbeddingModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.model.openai.OpenAiEmbeddingModel;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
+import org.springframework.web.client.RestClient;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 /**
  * LangChain4j 模型访问层。
@@ -30,6 +40,8 @@ public class ModelClientService {
     private final AppProperties appProperties;
     private final String ragEmbeddingProvider;
     private final int ragEmbeddingDimension;
+    private final RestClient openAiRestClient;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     public ModelClientService(AppProperties appProperties) {
         this.appProperties = appProperties;
@@ -72,6 +84,11 @@ public class ModelClientService {
                 .apiKey(appProperties.getOpenai().getApiKey())
                 .modelName(openAiEmbeddingModelName)
                 .build();
+
+        this.openAiRestClient = RestClient.builder()
+                .baseUrl(appProperties.getOpenai().getBaseUrl())
+                .defaultHeader("Authorization", "Bearer " + appProperties.getOpenai().getApiKey())
+                .build();
     }
 
     /**
@@ -111,6 +128,49 @@ public class ModelClientService {
         } catch (Exception ignored) {
         }
         return "rag";
+    }
+
+    /**
+     * 走 OpenAI 工具调用协议（tools/tool_calls）的一轮对话。
+     */
+    public ToolChatResult chatWithTools(String provider,
+                                        List<Map<String, Object>> messages,
+                                        List<ToolDefinition> tools) {
+        if (!"openai".equals(provider)) {
+            throw new IllegalArgumentException("tool protocol only supports openai provider currently");
+        }
+
+        try {
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("model", appProperties.getOpenai().getChatModel());
+            payload.put("temperature", 0.1);
+            payload.put("messages", messages);
+            payload.put("tool_choice", "auto");
+            payload.put("tools", toOpenAiTools(tools));
+
+            JsonNode response = openAiRestClient.post()
+                    .uri("/chat/completions")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(payload)
+                    .retrieve()
+                    .body(JsonNode.class);
+
+            if (response == null) {
+                return new ToolChatResult("", List.of());
+            }
+
+            JsonNode choices = response.path("choices");
+            if (!choices.isArray() || choices.isEmpty()) {
+                return new ToolChatResult("", List.of());
+            }
+
+            JsonNode message = choices.get(0).path("message");
+            String content = message.path("content").asText("");
+            List<ToolCallRequest> toolCalls = parseToolCalls(message.path("tool_calls"));
+            return new ToolChatResult(content, toolCalls);
+        } catch (Exception e) {
+            throw new IllegalStateException("failed to call chat with tools: " + rootCauseMessage(e), e);
+        }
     }
 
     /**
@@ -174,6 +234,59 @@ public class ModelClientService {
             throw new IllegalArgumentException("unsupported rag embedding provider: " + provider);
         }
         return normalized;
+    }
+
+    private List<Map<String, Object>> toOpenAiTools(List<ToolDefinition> tools) {
+        if (tools == null || tools.isEmpty()) {
+            return List.of();
+        }
+        List<Map<String, Object>> output = new ArrayList<>();
+        for (ToolDefinition tool : tools) {
+            Map<String, Object> function = new HashMap<>();
+            function.put("name", tool.name());
+            function.put("description", tool.description());
+            function.put("parameters", tool.inputSchema());
+
+            Map<String, Object> entry = new HashMap<>();
+            entry.put("type", "function");
+            entry.put("function", function);
+            output.add(entry);
+        }
+        return output;
+    }
+
+    private List<ToolCallRequest> parseToolCalls(JsonNode toolCallsNode) {
+        if (toolCallsNode == null || !toolCallsNode.isArray() || toolCallsNode.isEmpty()) {
+            return List.of();
+        }
+        List<ToolCallRequest> calls = new ArrayList<>();
+        for (int i = 0; i < toolCallsNode.size(); i++) {
+            JsonNode node = toolCallsNode.get(i);
+            String id = node.path("id").asText("");
+            if (id.isBlank()) {
+                id = "tool-call-" + i;
+            }
+            JsonNode functionNode = node.path("function");
+            String name = functionNode.path("name").asText("");
+            String argumentsJson = functionNode.path("arguments").asText("{}");
+            Map<String, Object> arguments = parseArguments(argumentsJson);
+            if (!name.isBlank()) {
+                calls.add(new ToolCallRequest(id, name, arguments));
+            }
+        }
+        return calls;
+    }
+
+    private Map<String, Object> parseArguments(String argumentsJson) {
+        try {
+            if (!StringUtils.hasText(argumentsJson)) {
+                return Map.of();
+            }
+            return objectMapper.readValue(argumentsJson, new TypeReference<Map<String, Object>>() {
+            });
+        } catch (Exception e) {
+            return Map.of("text", argumentsJson == null ? "" : argumentsJson);
+        }
     }
 
     private String rootCauseMessage(Throwable throwable) {

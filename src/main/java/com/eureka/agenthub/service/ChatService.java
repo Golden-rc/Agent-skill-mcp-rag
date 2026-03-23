@@ -5,12 +5,17 @@ import com.eureka.agenthub.model.ChatMessage;
 import com.eureka.agenthub.model.ChatRequest;
 import com.eureka.agenthub.model.ChatResponse;
 import com.eureka.agenthub.model.RagHit;
+import com.eureka.agenthub.model.ToolCallRequest;
+import com.eureka.agenthub.model.ToolChatResult;
+import com.eureka.agenthub.model.ToolDefinition;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.regex.Pattern;
 
 @Service
@@ -23,6 +28,10 @@ public class ChatService {
 
     private static final Pattern PURE_MATH_PATTERN = Pattern.compile("^[0-9\\s+\\-*/().=]+$");
     private static final Pattern PNG_URL_PATTERN = Pattern.compile("(https?://\\S+\\.png)");
+    private static final String CHAT_SYSTEM_PROMPT =
+            "You are an enterprise AI assistant. Answer in Chinese when user uses Chinese. " +
+                    "If retrieval context exists, cite source names in the answer. " +
+                    "For simple math or short factual questions, answer directly and do not force RAG context.";
 
     private final ProviderRouter providerRouter;
     private final MemoryService memoryService;
@@ -70,22 +79,23 @@ public class ChatService {
         List<String> toolCalls = new ArrayList<>();
         List<String> imageUrls = new ArrayList<>();
 
-        // 4) 简单意图路由，按关键词触发 MCP 工具。
-        ToolRouteResult toolRouteResult = (directMode && !screenshotIntent)
-                ? ToolRouteResult.empty()
-                : routeToolIfNeeded(userMessage, toolCalls, imageUrls);
-
-        // 5) 组装最终 prompt。
+        // 4) 组装最终 prompt。
         List<ChatMessage> prompt = new ArrayList<>();
-        prompt.add(new ChatMessage("system",
-                "You are an enterprise AI assistant. Answer in Chinese when user uses Chinese. " +
-                        "If retrieval context exists, cite source names in the answer. " +
-                        "For simple math or short factual questions, answer directly and do not force RAG context."));
+        prompt.add(new ChatMessage("system", CHAT_SYSTEM_PROMPT));
         prompt.addAll(history);
-        prompt.add(new ChatMessage("user", buildUserPrompt(userMessage, hits, toolRouteResult.promptContext())));
+        prompt.add(new ChatMessage("user", buildUserPrompt(userMessage, hits, "")));
 
-        // 6) 调用模型生成回答。
-        String answer = modelClientService.chat(provider, prompt);
+        // 5) 协议化工具调用（openai）或兼容旧的关键词路由。
+        String answer;
+        if (shouldUseToolProtocol(provider) && (!directMode || screenshotIntent)) {
+            answer = chatWithToolProtocol(provider, history, userMessage, hits, toolCalls, imageUrls);
+        } else {
+            ToolRouteResult toolRouteResult = (directMode && !screenshotIntent)
+                    ? ToolRouteResult.empty()
+                    : routeToolIfNeeded(userMessage, toolCalls, imageUrls);
+            prompt.set(prompt.size() - 1, new ChatMessage("user", buildUserPrompt(userMessage, hits, toolRouteResult.promptContext())));
+            answer = modelClientService.chat(provider, prompt);
+        }
 
         // 7) 写回会话记忆。
         memoryService.append(request.getSessionId(), new ChatMessage("user", userMessage));
@@ -211,6 +221,101 @@ public class ChatService {
     private record ToolRouteResult(String promptContext) {
         private static ToolRouteResult empty() {
             return new ToolRouteResult("");
+        }
+    }
+
+    private boolean shouldUseToolProtocol(String provider) {
+        if (!appProperties.getChat().isToolCallingEnabled()) {
+            return false;
+        }
+        if (appProperties.getChat().isToolCallingOpenaiOnly()) {
+            return "openai".equals(provider);
+        }
+        return true;
+    }
+
+    private String chatWithToolProtocol(String provider,
+                                        List<ChatMessage> history,
+                                        String userInput,
+                                        List<RagHit> hits,
+                                        List<String> toolCalls,
+                                        List<String> imageUrls) {
+        List<ToolDefinition> tools = mcpClientService.listCallableTools();
+        if (tools.isEmpty()) {
+            List<ChatMessage> prompt = new ArrayList<>();
+            prompt.add(new ChatMessage("system", CHAT_SYSTEM_PROMPT));
+            prompt.addAll(history);
+            prompt.add(new ChatMessage("user", buildUserPrompt(userInput, hits, "")));
+            return modelClientService.chat(provider, prompt);
+        }
+
+        List<Map<String, Object>> messages = new ArrayList<>();
+        messages.add(Map.of("role", "system", "content", CHAT_SYSTEM_PROMPT));
+        for (ChatMessage h : history) {
+            messages.add(Map.of(
+                    "role", h.role(),
+                    "content", h.content()
+            ));
+        }
+        messages.add(Map.of("role", "user", "content", buildUserPrompt(userInput, hits, "")));
+
+        int maxRounds = Math.max(1, appProperties.getChat().getMaxToolRounds());
+        for (int round = 0; round < maxRounds; round++) {
+            ToolChatResult turn = modelClientService.chatWithTools(provider, messages, tools);
+            List<ToolCallRequest> calls = turn.toolCalls();
+            if (calls == null || calls.isEmpty()) {
+                String text = turn.assistantText();
+                if (text == null || text.isBlank()) {
+                    break;
+                }
+                return text;
+            }
+
+            List<Map<String, Object>> assistantToolCalls = new ArrayList<>();
+            for (ToolCallRequest call : calls) {
+                assistantToolCalls.add(Map.of(
+                        "id", call.id(),
+                        "type", "function",
+                        "function", Map.of(
+                                "name", call.name(),
+                                "arguments", toJsonArguments(call.arguments())
+                        )
+                ));
+            }
+
+            Map<String, Object> assistantMessage = new HashMap<>();
+            assistantMessage.put("role", "assistant");
+            assistantMessage.put("content", turn.assistantText() == null ? "" : turn.assistantText());
+            assistantMessage.put("tool_calls", assistantToolCalls);
+            messages.add(assistantMessage);
+
+            for (ToolCallRequest call : calls) {
+                toolCalls.add(call.name());
+                String output = mcpClientService.callTool(call.name(), call.arguments());
+                String imageUrl = extractPngUrl(output);
+                if (!imageUrl.isBlank()) {
+                    imageUrls.add(imageUrl);
+                }
+
+                messages.add(Map.of(
+                        "role", "tool",
+                        "tool_call_id", call.id(),
+                        "content", output == null ? "" : output
+                ));
+            }
+        }
+        List<ChatMessage> fallbackPrompt = new ArrayList<>();
+        fallbackPrompt.add(new ChatMessage("system", CHAT_SYSTEM_PROMPT));
+        fallbackPrompt.addAll(history);
+        fallbackPrompt.add(new ChatMessage("user", buildUserPrompt(userInput, hits, "")));
+        return modelClientService.chat(provider, fallbackPrompt);
+    }
+
+    private String toJsonArguments(Map<String, Object> arguments) {
+        try {
+            return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(arguments == null ? Map.of() : arguments);
+        } catch (Exception e) {
+            return "{}";
         }
     }
 

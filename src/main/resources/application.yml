@@ -21,6 +21,10 @@ spring:
       max-request-size: 30MB
 
 app:
+  chat:
+    tool-calling-enabled: ${CHAT_TOOL_CALLING_ENABLED:true}
+    tool-calling-openai-only: ${CHAT_TOOL_CALLING_OPENAI_ONLY:true}
+    max-tool-rounds: ${CHAT_MAX_TOOL_ROUNDS:3}
   rag:
     embedding-provider: ${RAG_EMBED_PROVIDER:openai}
     embedding-model: ${RAG_EMBED_MODEL:embedding-2}

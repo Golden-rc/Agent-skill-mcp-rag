@@ -147,6 +147,14 @@ RAG_MIN_SCORE=0.35
 RAG_CITATION_MAX_CHARS=50
 ```
 
+Tool-calling protocol (OpenAI provider only by default):
+
+```bash
+CHAT_TOOL_CALLING_ENABLED=true
+CHAT_TOOL_CALLING_OPENAI_ONLY=true
+CHAT_MAX_TOOL_ROUNDS=3
+```
+
 `embedding-3` is 2048-dim, but pgvector `ivfflat` index cannot index vectors above 2000 dimensions.
 If you need `embedding-3`, switch index strategy (e.g. HNSW) first.
 

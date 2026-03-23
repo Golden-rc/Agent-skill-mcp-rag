@@ -1,6 +1,7 @@
 package com.eureka.agenthub.service;
 
 import com.eureka.agenthub.config.AppProperties;
+import com.eureka.agenthub.model.ToolDefinition;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
@@ -30,15 +31,18 @@ public class McpClientService {
     }
 
     public String callTool(String toolName, String text) {
+        Map<String, Object> arguments = new HashMap<>();
+        arguments.put("text", text);
+        return callTool(toolName, arguments);
+    }
+
+    public String callTool(String toolName, Map<String, Object> arguments) {
         ensureInitialized();
 
         // 组装工具参数。
-        Map<String, Object> arguments = new HashMap<>();
-        arguments.put("text", text);
-
         Map<String, Object> params = new HashMap<>();
         params.put("name", toolName);
-        params.put("arguments", arguments);
+        params.put("arguments", arguments == null ? Map.of() : arguments);
 
         Map<String, Object> request = new HashMap<>();
         request.put("jsonrpc", "2.0");
@@ -70,6 +74,28 @@ public class McpClientService {
 
         // 兼容旧格式（content 直接为字符串）。
         return result.asText("");
+    }
+
+    public List<ToolDefinition> listCallableTools() {
+        List<Map<String, Object>> registry = listRegistryTools();
+        List<ToolDefinition> tools = new ArrayList<>();
+        for (Map<String, Object> item : registry) {
+            boolean enabled = Boolean.TRUE.equals(item.get("enabled"));
+            if (!enabled) {
+                continue;
+            }
+            String name = String.valueOf(item.getOrDefault("name", "")).trim();
+            if (name.isBlank()) {
+                continue;
+            }
+            String description = String.valueOf(item.getOrDefault("description", ""));
+            @SuppressWarnings("unchecked")
+            Map<String, Object> schema = item.get("inputSchema") instanceof Map<?, ?> m
+                    ? (Map<String, Object>) m
+                    : defaultTextSchema();
+            tools.add(new ToolDefinition(name, description, schema));
+        }
+        return tools;
     }
 
     public List<Map<String, Object>> listRegistryTools() {
@@ -166,6 +192,19 @@ public class McpClientService {
         request.put("method", method);
         request.put("params", params);
         return request;
+    }
+
+    private Map<String, Object> defaultTextSchema() {
+        return Map.of(
+                "type", "object",
+                "properties", Map.of(
+                        "text", Map.of(
+                                "type", "string",
+                                "description", "Input text for tool processing"
+                        )
+                ),
+                "required", List.of("text")
+        );
     }
 
     @SuppressWarnings("unchecked")

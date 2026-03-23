@@ -15,6 +15,7 @@ public class AppProperties {
     private final Mcp mcp = new Mcp();
     private final Memory memory = new Memory();
     private final Rag rag = new Rag();
+    private final Chat chat = new Chat();
 
     public Ollama getOllama() {
         return ollama;
@@ -34,6 +35,10 @@ public class AppProperties {
 
     public Rag getRag() {
         return rag;
+    }
+
+    public Chat getChat() {
+        return chat;
     }
 
     public static class Ollama {
@@ -238,6 +243,39 @@ public class AppProperties {
 
         public void setCitationMaxChars(int citationMaxChars) {
             this.citationMaxChars = citationMaxChars;
+        }
+    }
+
+    public static class Chat {
+        /** 是否启用协议化工具调用（tool_calls）。 */
+        private boolean toolCallingEnabled = true;
+        /** 当前仅在 openai provider 启用协议化工具调用。 */
+        private boolean toolCallingOpenaiOnly = true;
+        /** 单次对话最多工具回合数。 */
+        private int maxToolRounds = 3;
+
+        public boolean isToolCallingEnabled() {
+            return toolCallingEnabled;
+        }
+
+        public void setToolCallingEnabled(boolean toolCallingEnabled) {
+            this.toolCallingEnabled = toolCallingEnabled;
+        }
+
+        public boolean isToolCallingOpenaiOnly() {
+            return toolCallingOpenaiOnly;
+        }
+
+        public void setToolCallingOpenaiOnly(boolean toolCallingOpenaiOnly) {
+            this.toolCallingOpenaiOnly = toolCallingOpenaiOnly;
+        }
+
+        public int getMaxToolRounds() {
+            return maxToolRounds;
+        }
+
+        public void setMaxToolRounds(int maxToolRounds) {
+            this.maxToolRounds = maxToolRounds;
         }
     }
 }
