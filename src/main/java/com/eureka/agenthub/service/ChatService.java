@@ -58,6 +58,7 @@ public class ChatService {
         // 1) 选择模型提供方。
         String provider = providerRouter.pickProvider(request.getProvider());
         String userMessage = request.getMessage();
+        boolean contextualFollowUp = isContextualFollowUp(userMessage);
         String mode = normalizeMode(request.getMode());
         boolean screenshotIntent = isScreenshotIntent(userMessage);
         ModeDecision modeDecision = "auto".equals(mode)
@@ -81,25 +82,37 @@ public class ChatService {
         List<RagHit> hits = directMode
                 ? Collections.emptyList()
                 : ragService.retrieve(userMessage, 5);
+        List<RagHit> packedHits = RagContextPacker.pack(
+                hits,
+                appProperties.getRag().getContextMaxChars(),
+                appProperties.getRag().getContextChunkMaxChars()
+        );
 
         List<String> toolCalls = new ArrayList<>();
         List<String> imageUrls = new ArrayList<>();
+
+        if (!directMode && isInsufficientEvidence(packedHits, contextualFollowUp)) {
+            String answer = insufficientEvidenceAnswer(userMessage);
+            memoryService.append(request.getSessionId(), new ChatMessage("user", userMessage));
+            memoryService.append(request.getSessionId(), new ChatMessage("assistant", answer));
+            return new ChatResponse(answer, provider, List.of(), toolCalls, imageUrls, effectiveMode, "rule-insufficient-evidence");
+        }
 
         // 4) 组装最终 prompt。
         List<ChatMessage> prompt = new ArrayList<>();
         prompt.add(new ChatMessage("system", CHAT_SYSTEM_PROMPT));
         prompt.addAll(history);
-        prompt.add(new ChatMessage("user", buildUserPrompt(userMessage, hits, "")));
+        prompt.add(new ChatMessage("user", buildUserPrompt(userMessage, packedHits, "")));
 
         // 5) 协议化工具调用（openai）或兼容旧的关键词路由。
         String answer;
         if (shouldUseToolProtocol(provider) && (!directMode || screenshotIntent)) {
-            answer = chatWithToolProtocol(provider, history, userMessage, hits, toolCalls, imageUrls);
+            answer = chatWithToolProtocol(provider, history, userMessage, packedHits, toolCalls, imageUrls);
         } else {
             ToolRouteResult toolRouteResult = (directMode && !screenshotIntent)
                     ? ToolRouteResult.empty()
                     : routeToolIfNeeded(userMessage, toolCalls, imageUrls);
-            prompt.set(prompt.size() - 1, new ChatMessage("user", buildUserPrompt(userMessage, hits, toolRouteResult.promptContext())));
+            prompt.set(prompt.size() - 1, new ChatMessage("user", buildUserPrompt(userMessage, packedHits, toolRouteResult.promptContext())));
             answer = modelClientService.chat(provider, prompt);
         }
 
@@ -107,11 +120,14 @@ public class ChatService {
         memoryService.append(request.getSessionId(), new ChatMessage("user", userMessage));
         memoryService.append(request.getSessionId(), new ChatMessage("assistant", answer));
 
-        return new ChatResponse(answer, provider, toResponseCitations(hits), toolCalls, imageUrls, effectiveMode, modeDecision.reason());
+        return new ChatResponse(answer, provider, toResponseCitations(packedHits), toolCalls, imageUrls, effectiveMode, modeDecision.reason());
     }
 
     private ModeDecision classifyAutoMode(String provider, String message) {
         // 第一层：快速规则，优先拦截简单问题。
+        if (isContextualFollowUp(message)) {
+            return new ModeDecision("rag", "rule-followup");
+        }
         if (isSimpleQuestion(message)) {
             return new ModeDecision("direct", "rule-simple");
         }
@@ -184,6 +200,37 @@ public class ChatService {
                 || normalized.contains("screen shot")
                 || normalized.contains("screen capture")
                 || normalized.contains("屏幕");
+    }
+
+    private boolean isContextualFollowUp(String message) {
+        if (message == null || message.isBlank()) {
+            return false;
+        }
+        String normalized = message.toLowerCase(Locale.ROOT);
+        return normalized.contains("上一个")
+                || normalized.contains("刚才")
+                || normalized.contains("继续")
+                || normalized.contains("前面")
+                || normalized.contains("上文")
+                || normalized.contains("这个问题")
+                || normalized.contains("那个问题");
+    }
+
+    private boolean isInsufficientEvidence(List<RagHit> hits, boolean contextualFollowUp) {
+        if (contextualFollowUp) {
+            // 指代型追问可优先依赖会话历史，不强制要求 RAG 命中条数。
+            return false;
+        }
+        int minEvidence = Math.max(1, appProperties.getRag().getMinEvidenceCount());
+        return hits == null || hits.size() < minEvidence;
+    }
+
+    private String insufficientEvidenceAnswer(String userInput) {
+        return "我暂时没有在知识库中找到足够依据来回答这个问题。\n"
+                + "建议：\n"
+                + "1) 换一种更具体的问法（补充对象/范围/时间）\n"
+                + "2) 先上传相关文档后再提问\n"
+                + "3) 如果你希望我基于已有对话继续，请直接说明“按上文继续这个问题”。";
     }
 
     private record ModeDecision(String mode, String reason) {

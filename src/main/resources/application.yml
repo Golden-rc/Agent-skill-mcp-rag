@@ -36,6 +36,9 @@ app:
     final-top-k: ${RAG_FINAL_TOPK:5}
     min-score: ${RAG_MIN_SCORE:0.35}
     citation-max-chars: ${RAG_CITATION_MAX_CHARS:50}
+    context-max-chars: ${RAG_CONTEXT_MAX_CHARS:2600}
+    context-chunk-max-chars: ${RAG_CONTEXT_CHUNK_MAX_CHARS:700}
+    min-evidence-count: ${RAG_MIN_EVIDENCE_COUNT:1}
   ollama:
     base-url: http://localhost:${OLLAMA_PORT:11434}
     chat-model: ${OLLAMA_CHAT_MODEL:qwen3:4b}

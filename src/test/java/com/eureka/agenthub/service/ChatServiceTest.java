@@ -119,4 +119,41 @@ class ChatServiceTest {
         assertEquals("a2", prompt.get(4).content());
         verify(ragService).retrieve("根据历史继续", 5);
     }
+
+    @Test
+    void shouldReturnInsufficientEvidenceTemplateWhenRagHasNoHits() {
+        ChatRequest request = new ChatRequest();
+        request.setSessionId("s3");
+        request.setProvider("ollama");
+        request.setMode("rag");
+        request.setMessage("给我数据库迁移步骤");
+
+        when(providerRouter.pickProvider("ollama")).thenReturn("ollama");
+        when(memoryService.loadHistory("s3")).thenReturn(List.of());
+        when(ragService.retrieve("给我数据库迁移步骤", 5)).thenReturn(List.of());
+
+        var response = chatService.chat(request);
+
+        assertTrue(response.answer().contains("没有在知识库中找到足够依据"));
+        verify(modelClientService, never()).chat(eq("ollama"), any());
+    }
+
+    @Test
+    void shouldPreferRagForContextualFollowUpInAutoMode() {
+        ChatRequest request = new ChatRequest();
+        request.setSessionId("s4");
+        request.setProvider("ollama");
+        request.setMode("auto");
+        request.setMessage("我上一个问题是啥");
+
+        when(providerRouter.pickProvider("ollama")).thenReturn("ollama");
+        when(memoryService.loadHistory("s4")).thenReturn(List.of(new ChatMessage("user", "前一个问题")));
+        when(ragService.retrieve("我上一个问题是啥", 5)).thenReturn(List.of(new RagHit("mem", "前文有提问", 0.95)));
+        when(modelClientService.chat(eq("ollama"), any())).thenReturn("你上一个问题是... ");
+
+        chatService.chat(request);
+
+        verify(ragService).retrieve("我上一个问题是啥", 5);
+        verify(modelClientService, never()).classifyMode(any(), any());
+    }
 }

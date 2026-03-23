@@ -174,6 +174,12 @@ public class AppProperties {
         private double minScore = 0.35;
         /** Max citation content length returned by chat API. */
         private int citationMaxChars = 50;
+        /** RAG 上下文拼接的最大总字符数预算。 */
+        private int contextMaxChars = 2600;
+        /** 单条 RAG 命中在 prompt 中的最大字符数。 */
+        private int contextChunkMaxChars = 700;
+        /** 判定为“证据不足”时所需的最小命中条数。 */
+        private int minEvidenceCount = 1;
 
         public String getEmbeddingProvider() {
             return embeddingProvider;
@@ -253,6 +259,30 @@ public class AppProperties {
 
         public void setCitationMaxChars(int citationMaxChars) {
             this.citationMaxChars = citationMaxChars;
+        }
+
+        public int getContextMaxChars() {
+            return contextMaxChars;
+        }
+
+        public void setContextMaxChars(int contextMaxChars) {
+            this.contextMaxChars = contextMaxChars;
+        }
+
+        public int getContextChunkMaxChars() {
+            return contextChunkMaxChars;
+        }
+
+        public void setContextChunkMaxChars(int contextChunkMaxChars) {
+            this.contextChunkMaxChars = contextChunkMaxChars;
+        }
+
+        public int getMinEvidenceCount() {
+            return minEvidenceCount;
+        }
+
+        public void setMinEvidenceCount(int minEvidenceCount) {
+            this.minEvidenceCount = minEvidenceCount;
         }
     }
 
