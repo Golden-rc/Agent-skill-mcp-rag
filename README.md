@@ -25,14 +25,14 @@ export PATH="$JAVA_HOME/bin:$PATH"
 ## 2) Start infrastructure
 
 ```bash
-cp .env .env
+cp .env.example .env
 docker compose up -d
 ```
 
 If you use cloud API (no local Ollama), start only Postgres + Redis:
 
 ```bash
-cp .env .env
+cp .env.example .env
 docker compose -f docker-compose.api.yml up -d
 ```
 
