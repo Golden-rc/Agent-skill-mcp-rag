@@ -24,6 +24,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -188,6 +189,7 @@ class ChatServiceTest {
 
         assertTrue(response.toolProtocolUsed());
         assertEquals(2, response.toolRounds());
+        assertEquals(2, response.toolRoundLatenciesMs().size());
         assertEquals("总结完成", response.answer());
         assertEquals("summarize", response.toolCalls().get(0));
         verify(modelClientService, never()).chat(eq("openai"), any());
@@ -210,5 +212,97 @@ class ChatServiceTest {
 
         assertTrue(response.toolErrors().contains("tool test mode requires openai provider"));
         assertFalse(response.toolProtocolUsed());
+    }
+
+    @Test
+    void shouldCollectToolErrorAndContinueProtocolChain() {
+        appProperties.getChat().setToolCallingEnabled(true);
+
+        ChatRequest request = new ChatRequest();
+        request.setSessionId("s7");
+        request.setProvider("openai");
+        request.setMode("rag");
+        request.setMessage("调用工具并继续回答");
+
+        when(providerRouter.pickProvider("openai")).thenReturn("openai");
+        when(memoryService.loadHistory("s7")).thenReturn(List.of());
+        when(ragService.retrieve("调用工具并继续回答", 5)).thenReturn(List.of(new RagHit("kb", "chunk", 0.91)));
+        when(mcpClientService.listCallableTools()).thenReturn(List.of(
+                new ToolDefinition("summarize", "总结文本", Map.of("type", "object"))
+        ));
+        when(modelClientService.chatWithTools(eq("openai"), any(), any())).thenReturn(
+                new ToolChatResult("", List.of(new ToolCallRequest("call-1", "summarize", Map.of("text", "abc")))),
+                new ToolChatResult("已处理工具失败并给出回答", List.of())
+        );
+        when(mcpClientService.callTool(eq("summarize"), org.mockito.ArgumentMatchers.<Map<String, Object>>any()))
+                .thenThrow(new IllegalArgumentException("mock tool failed"));
+
+        var response = chatService.chat(request);
+
+        assertTrue(response.toolProtocolUsed());
+        assertTrue(response.toolErrors().stream().anyMatch(s -> s.contains("summarize") && s.contains("failed")));
+        assertEquals("已处理工具失败并给出回答", response.answer());
+    }
+
+    @Test
+    void shouldFallbackAfterMaxToolRoundsExceeded() {
+        appProperties.getChat().setToolCallingEnabled(true);
+        appProperties.getChat().setMaxToolRounds(1);
+
+        ChatRequest request = new ChatRequest();
+        request.setSessionId("s8");
+        request.setProvider("openai");
+        request.setMode("rag");
+        request.setMessage("反复调用工具测试");
+
+        when(providerRouter.pickProvider("openai")).thenReturn("openai");
+        when(memoryService.loadHistory("s8")).thenReturn(List.of());
+        when(ragService.retrieve("反复调用工具测试", 5)).thenReturn(List.of(new RagHit("kb", "chunk", 0.91)));
+        when(mcpClientService.listCallableTools()).thenReturn(List.of(
+                new ToolDefinition("summarize", "总结文本", Map.of("type", "object"))
+        ));
+        when(modelClientService.chatWithTools(eq("openai"), any(), any())).thenReturn(
+                new ToolChatResult("", List.of(new ToolCallRequest("call-1", "summarize", Map.of("text", "abc"))))
+        );
+        when(mcpClientService.callTool(eq("summarize"), org.mockito.ArgumentMatchers.<Map<String, Object>>any()))
+                .thenReturn("tool-output");
+        when(modelClientService.chat(eq("openai"), any())).thenReturn("fallback answer");
+
+        var response = chatService.chat(request);
+
+        assertTrue(response.toolProtocolUsed());
+        assertEquals(1, response.toolRounds());
+        assertTrue(response.toolErrors().stream().anyMatch(s -> s.contains("max rounds")));
+        assertEquals("fallback answer", response.answer());
+        verify(modelClientService, times(1)).chat(eq("openai"), any());
+    }
+
+    @Test
+    void shouldCollectToolErrorsWhenToolOutputContainsFailureText() {
+        appProperties.getChat().setToolCallingEnabled(true);
+
+        ChatRequest request = new ChatRequest();
+        request.setSessionId("s9");
+        request.setProvider("openai");
+        request.setMode("rag");
+        request.setMessage("帮我截图");
+
+        when(providerRouter.pickProvider("openai")).thenReturn("openai");
+        when(memoryService.loadHistory("s9")).thenReturn(List.of());
+        when(ragService.retrieve("帮我截图", 5)).thenReturn(List.of(new RagHit("kb", "chunk", 0.91)));
+        when(mcpClientService.listCallableTools()).thenReturn(List.of(
+                new ToolDefinition("take_screenshot", "截图", Map.of("type", "object"))
+        ));
+        when(modelClientService.chatWithTools(eq("openai"), any(), any())).thenReturn(
+                new ToolChatResult("", List.of(new ToolCallRequest("call-1", "take_screenshot", Map.of("text", "截图")))),
+                new ToolChatResult("截图失败已记录", List.of())
+        );
+        when(mcpClientService.callTool(eq("take_screenshot"), org.mockito.ArgumentMatchers.<Map<String, Object>>any()))
+                .thenReturn("截图失败：当前环境是无头模式，无法捕获屏幕");
+
+        var response = chatService.chat(request);
+
+        assertTrue(response.toolProtocolUsed());
+        assertTrue(response.toolErrors().stream().anyMatch(s -> s.contains("take_screenshot") && s.contains("reported error")));
     }
 }

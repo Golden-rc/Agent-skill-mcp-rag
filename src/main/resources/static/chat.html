@@ -714,7 +714,8 @@
         `<span class="tag">citations: ${(data.citations || []).length}</span>` +
         `<span class="tag">images: ${(data.imageUrls || []).length}</span>` +
         `<span class="tag">toolProtocol: ${data.toolProtocolUsed ? "on" : "off"}</span>` +
-        `<span class="tag">rounds: ${Number(data.toolRounds || 0)}</span>`;
+        `<span class="tag">rounds: ${Number(data.toolRounds || 0)}</span>` +
+        `<span class="tag">latencies: ${((data.toolRoundLatenciesMs || []).join("/") || "-")}</span>`;
 
       let out = data.answer || "";
       if ((data.citations || []).length > 0) {
@@ -733,6 +734,7 @@
         toolCalls: data.toolCalls || [],
         toolProtocolUsed: Boolean(data.toolProtocolUsed),
         toolRounds: Number(data.toolRounds || 0),
+        toolRoundLatenciesMs: data.toolRoundLatenciesMs || [],
         toolErrors: data.toolErrors || [],
         imageUrls: data.imageUrls || [],
         citations: (data.citations || []).length,
@@ -744,6 +746,7 @@
       toolProtocolView.textContent = JSON.stringify({
         toolProtocolUsed: Boolean(data.toolProtocolUsed),
         rounds: Number(data.toolRounds || 0),
+        roundLatenciesMs: data.toolRoundLatenciesMs || [],
         calls: data.toolCalls || [],
         errors: data.toolErrors || []
       }, null, 2);

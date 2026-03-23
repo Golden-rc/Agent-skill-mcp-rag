@@ -42,6 +42,7 @@ class ChatControllerTest {
                 false,
                 0,
                 List.of(),
+                List.of(),
                 "rag",
                 "manual-rag"
         );

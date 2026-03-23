@@ -8,6 +8,8 @@ import com.eureka.agenthub.model.RagHit;
 import com.eureka.agenthub.model.ToolCallRequest;
 import com.eureka.agenthub.model.ToolChatResult;
 import com.eureka.agenthub.model.ToolDefinition;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -25,6 +27,8 @@ import java.util.regex.Pattern;
  * 主流程：模型路由 -> 读取会话记忆 -> RAG 检索 -> 可选工具调用 -> LLM 生成 -> 写回记忆。
  */
 public class ChatService {
+
+    private static final Logger log = LoggerFactory.getLogger(ChatService.class);
 
     private static final Pattern PURE_MATH_PATTERN = Pattern.compile("^[0-9\\s+\\-*/().=]+$");
     private static final Pattern PNG_URL_PATTERN = Pattern.compile("(https?://\\S+\\.png)");
@@ -91,6 +95,7 @@ public class ChatService {
         List<String> toolCalls = new ArrayList<>();
         List<String> imageUrls = new ArrayList<>();
         List<String> toolErrors = new ArrayList<>();
+        List<Long> toolRoundLatenciesMs = new ArrayList<>();
         boolean toolProtocolUsed = false;
         int toolRounds = 0;
 
@@ -99,7 +104,7 @@ public class ChatService {
             memoryService.append(request.getSessionId(), new ChatMessage("user", userMessage));
             memoryService.append(request.getSessionId(), new ChatMessage("assistant", answer));
             return new ChatResponse(answer, provider, List.of(), toolCalls, imageUrls,
-                    false, 0, toolErrors, effectiveMode, "rule-insufficient-evidence");
+                    false, 0, toolRoundLatenciesMs, toolErrors, effectiveMode, "rule-insufficient-evidence");
         }
 
         // 4) 组装最终 prompt。
@@ -116,6 +121,7 @@ public class ChatService {
             toolProtocolUsed = protocolResult.used();
             toolRounds = protocolResult.rounds();
             toolErrors.addAll(protocolResult.errors());
+            toolRoundLatenciesMs.addAll(protocolResult.roundLatenciesMs());
         } else {
             if (request.isToolTestMode()) {
                 toolErrors.add("tool test mode requires openai provider");
@@ -131,8 +137,12 @@ public class ChatService {
         memoryService.append(request.getSessionId(), new ChatMessage("user", userMessage));
         memoryService.append(request.getSessionId(), new ChatMessage("assistant", answer));
 
+        log.info("chat result session={} provider={} mode={} reason={} protocolUsed={} rounds={} tools={} errors={}",
+                request.getSessionId(), provider, effectiveMode, modeDecision.reason(),
+                toolProtocolUsed, toolRounds, toolCalls, toolErrors);
+
         return new ChatResponse(answer, provider, toResponseCitations(packedHits), toolCalls, imageUrls,
-                toolProtocolUsed, toolRounds, toolErrors, effectiveMode, modeDecision.reason());
+                toolProtocolUsed, toolRounds, toolRoundLatenciesMs, toolErrors, effectiveMode, modeDecision.reason());
     }
 
     private ModeDecision classifyAutoMode(String provider, String message) {
@@ -289,7 +299,11 @@ public class ChatService {
         }
     }
 
-    private record ProtocolChatResult(String answer, boolean used, int rounds, List<String> errors) {
+    private record ProtocolChatResult(String answer,
+                                      boolean used,
+                                      int rounds,
+                                      List<Long> roundLatenciesMs,
+                                      List<String> errors) {
     }
 
     private boolean shouldUseToolProtocol(String provider, boolean forceByTestMode) {
@@ -312,13 +326,14 @@ public class ChatService {
                                                     List<String> toolCalls,
                                                     List<String> imageUrls) {
         List<String> toolErrors = new ArrayList<>();
+        List<Long> roundLatenciesMs = new ArrayList<>();
         List<ToolDefinition> tools = mcpClientService.listCallableTools();
         if (tools.isEmpty()) {
             List<ChatMessage> prompt = new ArrayList<>();
             prompt.add(new ChatMessage("system", CHAT_SYSTEM_PROMPT));
             prompt.addAll(history);
             prompt.add(new ChatMessage("user", buildUserPrompt(userInput, hits, "")));
-            return new ProtocolChatResult(modelClientService.chat(provider, prompt), false, 0, toolErrors);
+            return new ProtocolChatResult(modelClientService.chat(provider, prompt), false, 0, roundLatenciesMs, toolErrors);
         }
 
         List<Map<String, Object>> messages = new ArrayList<>();
@@ -333,14 +348,16 @@ public class ChatService {
 
         int maxRounds = Math.max(1, appProperties.getChat().getMaxToolRounds());
         for (int round = 0; round < maxRounds; round++) {
+            long roundStart = System.nanoTime();
             ToolChatResult turn = modelClientService.chatWithTools(provider, messages, tools);
             List<ToolCallRequest> calls = turn.toolCalls();
             if (calls == null || calls.isEmpty()) {
+                roundLatenciesMs.add((System.nanoTime() - roundStart) / 1_000_000L);
                 String text = turn.assistantText();
                 if (text == null || text.isBlank()) {
                     break;
                 }
-                return new ProtocolChatResult(text, true, round + 1, toolErrors);
+                return new ProtocolChatResult(text, true, round + 1, roundLatenciesMs, toolErrors);
             }
 
             List<Map<String, Object>> assistantToolCalls = new ArrayList<>();
@@ -364,12 +381,18 @@ public class ChatService {
             for (ToolCallRequest call : calls) {
                 toolCalls.add(call.name());
                 String output;
+                boolean failedByException = false;
                 try {
                     output = mcpClientService.callTool(call.name(), call.arguments());
                 } catch (Exception e) {
                     String error = "tool " + call.name() + " failed: " + (e.getMessage() == null ? "unknown" : e.getMessage());
                     toolErrors.add(error);
                     output = error;
+                    failedByException = true;
+                }
+                String outputError = detectToolOutputError(call.name(), output);
+                if (!failedByException && !outputError.isBlank()) {
+                    toolErrors.add(outputError);
                 }
                 String imageUrl = extractPngUrl(output);
                 if (!imageUrl.isBlank()) {
@@ -382,13 +405,34 @@ public class ChatService {
                         "content", output == null ? "" : output
                 ));
             }
+
+            roundLatenciesMs.add((System.nanoTime() - roundStart) / 1_000_000L);
         }
         List<ChatMessage> fallbackPrompt = new ArrayList<>();
         fallbackPrompt.add(new ChatMessage("system", CHAT_SYSTEM_PROMPT));
         fallbackPrompt.addAll(history);
         fallbackPrompt.add(new ChatMessage("user", buildUserPrompt(userInput, hits, "")));
         toolErrors.add("tool protocol reached max rounds and fell back to normal chat");
-        return new ProtocolChatResult(modelClientService.chat(provider, fallbackPrompt), true, maxRounds, toolErrors);
+        log.warn("tool protocol fallback after max rounds={}, session-like prompt userInput={}", maxRounds, limitLength(userInput, 60));
+        return new ProtocolChatResult(modelClientService.chat(provider, fallbackPrompt), true, maxRounds, roundLatenciesMs, toolErrors);
+    }
+
+    private String detectToolOutputError(String toolName, String output) {
+        if (output == null || output.isBlank()) {
+            return "tool " + toolName + " returned empty output";
+        }
+        String normalized = output.toLowerCase(Locale.ROOT);
+        boolean failed = output.contains("失败")
+                || output.contains("无法")
+                || normalized.contains("error")
+                || normalized.contains("failed")
+                || normalized.contains("headless")
+                || normalized.contains("denied")
+                || normalized.contains("permission");
+        if (!failed) {
+            return "";
+        }
+        return "tool " + toolName + " reported error: " + limitLength(output.replaceAll("\\s+", " ").trim(), 120);
     }
 
     private String toJsonArguments(Map<String, Object> arguments) {

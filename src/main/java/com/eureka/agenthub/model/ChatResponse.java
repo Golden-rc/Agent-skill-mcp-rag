@@ -18,6 +18,8 @@ public record ChatResponse(String answer,
                            boolean toolProtocolUsed,
                            // 协议链路总轮次。
                            int toolRounds,
+                           // 协议每轮耗时（毫秒）。
+                           List<Long> toolRoundLatenciesMs,
                            // 协议链路中的工具错误摘要。
                            List<String> toolErrors,
                            // 本次实际回答模式：direct / rag。
