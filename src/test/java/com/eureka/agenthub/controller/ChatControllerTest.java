@@ -39,6 +39,9 @@ class ChatControllerTest {
                 List.of(new RagHit("kb", "doc chunk", 0.9)),
                 List.of("extract_todos"),
                 List.of(),
+                false,
+                0,
+                List.of(),
                 "rag",
                 "manual-rag"
         );

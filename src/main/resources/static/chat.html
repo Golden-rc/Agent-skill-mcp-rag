@@ -344,7 +344,20 @@
           </select>
         </div>
         <div class="small" style="display:flex;align-items:end;">
-          `严格直答` 会跳过历史/RAG/工具；`知识库增强` 会优先使用知识库上下文。
+          `严格直答` 现在也会带最近上下文；`知识库增强` 会优先使用知识库证据。
+        </div>
+      </div>
+
+      <div class="row inline" style="margin-bottom:0; align-items:end;">
+        <div>
+          <label for="toolTestMode">协议测试</label>
+          <select id="toolTestMode">
+            <option value="off" selected>关闭</option>
+            <option value="on">开启（优先tools/tool_calls）</option>
+          </select>
+        </div>
+        <div class="small" style="display:flex;align-items:end;">
+          开启后会尝试强制走协议工具链路（建议 provider 选 openai）。
         </div>
       </div>
 
@@ -363,6 +376,7 @@
       </div>
 
       <div id="chatMeta" class="meta">等待响应...</div>
+      <div id="toolProtocolView" class="meta" style="margin-top:10px;">工具协议可视化：等待请求...</div>
     </article>
   </section>
 </main>
@@ -373,11 +387,13 @@
   const sessionIdInput = document.getElementById("sessionId");
   const providerSelect = document.getElementById("provider");
   const modeSelect = document.getElementById("mode");
+  const toolTestModeSelect = document.getElementById("toolTestMode");
   const messageInput = document.getElementById("message");
 
   const chatStatus = document.getElementById("chatStatus");
   const chatKpi = document.getElementById("chatKpi");
   const chatMeta = document.getElementById("chatMeta");
+  const toolProtocolView = document.getElementById("toolProtocolView");
   const timeline = document.getElementById("timeline");
 
   const sessionList = document.getElementById("sessionList");
@@ -685,6 +701,7 @@
         sessionId,
         provider: providerSelect.value,
         mode: modeSelect.value,
+        toolTestMode: toolTestModeSelect.value === "on",
         message: userInput
       };
 
@@ -695,7 +712,9 @@
         `<span class="tag">reason: ${esc(data.modeReason || "-")}</span>` +
         `<span class="tag">tools: ${esc((data.toolCalls || []).join(", ") || "none")}</span>` +
         `<span class="tag">citations: ${(data.citations || []).length}</span>` +
-        `<span class="tag">images: ${(data.imageUrls || []).length}</span>`;
+        `<span class="tag">images: ${(data.imageUrls || []).length}</span>` +
+        `<span class="tag">toolProtocol: ${data.toolProtocolUsed ? "on" : "off"}</span>` +
+        `<span class="tag">rounds: ${Number(data.toolRounds || 0)}</span>`;
 
       let out = data.answer || "";
       if ((data.citations || []).length > 0) {
@@ -712,10 +731,21 @@
         modeUsed: data.modeUsed,
         modeReason: data.modeReason,
         toolCalls: data.toolCalls || [],
+        toolProtocolUsed: Boolean(data.toolProtocolUsed),
+        toolRounds: Number(data.toolRounds || 0),
+        toolErrors: data.toolErrors || [],
         imageUrls: data.imageUrls || [],
         citations: (data.citations || []).length,
         requestMode: modeSelect.value,
+        toolTestMode: toolTestModeSelect.value,
         sessionId
+      }, null, 2);
+
+      toolProtocolView.textContent = JSON.stringify({
+        toolProtocolUsed: Boolean(data.toolProtocolUsed),
+        rounds: Number(data.toolRounds || 0),
+        calls: data.toolCalls || [],
+        errors: data.toolErrors || []
       }, null, 2);
 
       setStatus(chatStatus, "请求成功", "ok");

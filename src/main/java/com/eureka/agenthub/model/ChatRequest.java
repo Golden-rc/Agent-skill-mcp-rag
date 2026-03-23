@@ -17,6 +17,8 @@ public class ChatRequest {
     private String provider = "auto";
     /** 回答模式：auto/direct/rag。 */
     private String mode = "auto";
+    /** 前端测试开关：强制尝试 tools/tool_calls 协议链路。 */
+    private boolean toolTestMode = false;
 
     public String getSessionId() {
         return sessionId;
@@ -48,5 +50,13 @@ public class ChatRequest {
 
     public void setMode(String mode) {
         this.mode = mode;
+    }
+
+    public boolean isToolTestMode() {
+        return toolTestMode;
+    }
+
+    public void setToolTestMode(boolean toolTestMode) {
+        this.toolTestMode = toolTestMode;
     }
 }

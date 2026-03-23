@@ -90,12 +90,16 @@ public class ChatService {
 
         List<String> toolCalls = new ArrayList<>();
         List<String> imageUrls = new ArrayList<>();
+        List<String> toolErrors = new ArrayList<>();
+        boolean toolProtocolUsed = false;
+        int toolRounds = 0;
 
         if (!directMode && isInsufficientEvidence(packedHits, contextualFollowUp)) {
             String answer = insufficientEvidenceAnswer(userMessage);
             memoryService.append(request.getSessionId(), new ChatMessage("user", userMessage));
             memoryService.append(request.getSessionId(), new ChatMessage("assistant", answer));
-            return new ChatResponse(answer, provider, List.of(), toolCalls, imageUrls, effectiveMode, "rule-insufficient-evidence");
+            return new ChatResponse(answer, provider, List.of(), toolCalls, imageUrls,
+                    false, 0, toolErrors, effectiveMode, "rule-insufficient-evidence");
         }
 
         // 4) 组装最终 prompt。
@@ -106,9 +110,16 @@ public class ChatService {
 
         // 5) 协议化工具调用（openai）或兼容旧的关键词路由。
         String answer;
-        if (shouldUseToolProtocol(provider) && (!directMode || screenshotIntent)) {
-            answer = chatWithToolProtocol(provider, history, userMessage, packedHits, toolCalls, imageUrls);
+        if (shouldUseToolProtocol(provider, request.isToolTestMode()) && (!directMode || screenshotIntent || request.isToolTestMode())) {
+            ProtocolChatResult protocolResult = chatWithToolProtocol(provider, history, userMessage, packedHits, toolCalls, imageUrls);
+            answer = protocolResult.answer();
+            toolProtocolUsed = protocolResult.used();
+            toolRounds = protocolResult.rounds();
+            toolErrors.addAll(protocolResult.errors());
         } else {
+            if (request.isToolTestMode()) {
+                toolErrors.add("tool test mode requires openai provider");
+            }
             ToolRouteResult toolRouteResult = (directMode && !screenshotIntent)
                     ? ToolRouteResult.empty()
                     : routeToolIfNeeded(userMessage, toolCalls, imageUrls);
@@ -120,7 +131,8 @@ public class ChatService {
         memoryService.append(request.getSessionId(), new ChatMessage("user", userMessage));
         memoryService.append(request.getSessionId(), new ChatMessage("assistant", answer));
 
-        return new ChatResponse(answer, provider, toResponseCitations(packedHits), toolCalls, imageUrls, effectiveMode, modeDecision.reason());
+        return new ChatResponse(answer, provider, toResponseCitations(packedHits), toolCalls, imageUrls,
+                toolProtocolUsed, toolRounds, toolErrors, effectiveMode, modeDecision.reason());
     }
 
     private ModeDecision classifyAutoMode(String provider, String message) {
@@ -277,7 +289,13 @@ public class ChatService {
         }
     }
 
-    private boolean shouldUseToolProtocol(String provider) {
+    private record ProtocolChatResult(String answer, boolean used, int rounds, List<String> errors) {
+    }
+
+    private boolean shouldUseToolProtocol(String provider, boolean forceByTestMode) {
+        if (forceByTestMode) {
+            return "openai".equals(provider);
+        }
         if (!appProperties.getChat().isToolCallingEnabled()) {
             return false;
         }
@@ -287,19 +305,20 @@ public class ChatService {
         return true;
     }
 
-    private String chatWithToolProtocol(String provider,
-                                        List<ChatMessage> history,
-                                        String userInput,
-                                        List<RagHit> hits,
-                                        List<String> toolCalls,
-                                        List<String> imageUrls) {
+    private ProtocolChatResult chatWithToolProtocol(String provider,
+                                                    List<ChatMessage> history,
+                                                    String userInput,
+                                                    List<RagHit> hits,
+                                                    List<String> toolCalls,
+                                                    List<String> imageUrls) {
+        List<String> toolErrors = new ArrayList<>();
         List<ToolDefinition> tools = mcpClientService.listCallableTools();
         if (tools.isEmpty()) {
             List<ChatMessage> prompt = new ArrayList<>();
             prompt.add(new ChatMessage("system", CHAT_SYSTEM_PROMPT));
             prompt.addAll(history);
             prompt.add(new ChatMessage("user", buildUserPrompt(userInput, hits, "")));
-            return modelClientService.chat(provider, prompt);
+            return new ProtocolChatResult(modelClientService.chat(provider, prompt), false, 0, toolErrors);
         }
 
         List<Map<String, Object>> messages = new ArrayList<>();
@@ -321,7 +340,7 @@ public class ChatService {
                 if (text == null || text.isBlank()) {
                     break;
                 }
-                return text;
+                return new ProtocolChatResult(text, true, round + 1, toolErrors);
             }
 
             List<Map<String, Object>> assistantToolCalls = new ArrayList<>();
@@ -344,7 +363,14 @@ public class ChatService {
 
             for (ToolCallRequest call : calls) {
                 toolCalls.add(call.name());
-                String output = mcpClientService.callTool(call.name(), call.arguments());
+                String output;
+                try {
+                    output = mcpClientService.callTool(call.name(), call.arguments());
+                } catch (Exception e) {
+                    String error = "tool " + call.name() + " failed: " + (e.getMessage() == null ? "unknown" : e.getMessage());
+                    toolErrors.add(error);
+                    output = error;
+                }
                 String imageUrl = extractPngUrl(output);
                 if (!imageUrl.isBlank()) {
                     imageUrls.add(imageUrl);
@@ -361,7 +387,8 @@ public class ChatService {
         fallbackPrompt.add(new ChatMessage("system", CHAT_SYSTEM_PROMPT));
         fallbackPrompt.addAll(history);
         fallbackPrompt.add(new ChatMessage("user", buildUserPrompt(userInput, hits, "")));
-        return modelClientService.chat(provider, fallbackPrompt);
+        toolErrors.add("tool protocol reached max rounds and fell back to normal chat");
+        return new ProtocolChatResult(modelClientService.chat(provider, fallbackPrompt), true, maxRounds, toolErrors);
     }
 
     private String toJsonArguments(Map<String, Object> arguments) {

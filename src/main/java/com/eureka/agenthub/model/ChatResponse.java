@@ -14,6 +14,12 @@ public record ChatResponse(String answer,
                            List<String> toolCalls,
                            // 工具产出的可展示图片 URL。
                            List<String> imageUrls,
+                           // 是否走了 tools/tool_calls 协议链路。
+                           boolean toolProtocolUsed,
+                           // 协议链路总轮次。
+                           int toolRounds,
+                           // 协议链路中的工具错误摘要。
+                           List<String> toolErrors,
                            // 本次实际回答模式：direct / rag。
                            String modeUsed,
                            // 模式决策来源，便于前端调试。
