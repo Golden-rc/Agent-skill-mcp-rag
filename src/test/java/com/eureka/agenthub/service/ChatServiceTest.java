@@ -305,4 +305,34 @@ class ChatServiceTest {
         assertTrue(response.toolProtocolUsed());
         assertTrue(response.toolErrors().stream().anyMatch(s -> s.contains("take_screenshot") && s.contains("reported error")));
     }
+
+    @Test
+    void shouldNotBlockToolProtocolByInsufficientEvidence() {
+        appProperties.getChat().setToolCallingEnabled(true);
+
+        ChatRequest request = new ChatRequest();
+        request.setSessionId("s10");
+        request.setProvider("openai");
+        request.setMode("rag");
+        request.setMessage("帮我查一下上海现在天气");
+
+        when(providerRouter.pickProvider("openai")).thenReturn("openai");
+        when(memoryService.loadHistory("s10")).thenReturn(List.of());
+        when(ragService.retrieve("帮我查一下上海现在天气", 5)).thenReturn(List.of());
+        when(mcpClientService.listCallableTools()).thenReturn(List.of(
+                new ToolDefinition("query_weather", "Query real-time weather by city name", Map.of("type", "object"))
+        ));
+        when(modelClientService.chatWithTools(eq("openai"), any(), any())).thenReturn(
+                new ToolChatResult("", List.of(new ToolCallRequest("call-1", "query_weather", Map.of("city", "上海")))),
+                new ToolChatResult("上海当前多云，温度 23°C", List.of())
+        );
+        when(mcpClientService.callTool(eq("query_weather"), org.mockito.ArgumentMatchers.<Map<String, Object>>any()))
+                .thenReturn("天气查询结果\n城市: 上海\n温度: 23.0°C");
+
+        var response = chatService.chat(request);
+
+        assertTrue(response.toolProtocolUsed());
+        assertEquals("上海当前多云，温度 23°C", response.answer());
+        assertTrue(response.toolCalls().contains("query_weather"));
+    }
 }

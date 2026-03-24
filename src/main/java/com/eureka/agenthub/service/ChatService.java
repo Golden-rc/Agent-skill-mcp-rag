@@ -98,8 +98,13 @@ public class ChatService {
         List<Long> toolRoundLatenciesMs = new ArrayList<>();
         boolean toolProtocolUsed = false;
         int toolRounds = 0;
+        boolean protocolEligible = shouldUseToolProtocol(provider, request.isToolTestMode())
+                && (!directMode || screenshotIntent || request.isToolTestMode());
 
-        if (!directMode && isInsufficientEvidence(packedHits, contextualFollowUp)) {
+        // 低证据兜底只在“非工具协议链路”生效。
+        // 若可走 tools/tool_calls，允许模型先尝试调用工具（例如天气查询），
+        // 避免被 RAG 证据不足提前拦截。
+        if (!directMode && !protocolEligible && isInsufficientEvidence(packedHits, contextualFollowUp)) {
             String answer = insufficientEvidenceAnswer(userMessage);
             memoryService.append(request.getSessionId(), new ChatMessage("user", userMessage));
             memoryService.append(request.getSessionId(), new ChatMessage("assistant", answer));
@@ -115,7 +120,7 @@ public class ChatService {
 
         // 5) 协议化工具调用（openai）或兼容旧的关键词路由。
         String answer;
-        if (shouldUseToolProtocol(provider, request.isToolTestMode()) && (!directMode || screenshotIntent || request.isToolTestMode())) {
+        if (protocolEligible) {
             ProtocolChatResult protocolResult = chatWithToolProtocol(provider, history, userMessage, packedHits, toolCalls, imageUrls);
             answer = protocolResult.answer();
             toolProtocolUsed = protocolResult.used();
