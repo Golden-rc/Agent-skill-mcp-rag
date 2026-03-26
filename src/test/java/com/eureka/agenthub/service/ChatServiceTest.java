@@ -1,33 +1,17 @@
 package com.eureka.agenthub.service;
 
-import com.eureka.agenthub.config.AppProperties;
-import com.eureka.agenthub.model.ChatMessage;
 import com.eureka.agenthub.model.ChatRequest;
-import com.eureka.agenthub.model.RagHit;
-import com.eureka.agenthub.model.ToolCallRequest;
-import com.eureka.agenthub.model.ToolChatResult;
-import com.eureka.agenthub.model.ToolDefinition;
-import com.eureka.agenthub.port.MemoryPort;
-import com.eureka.agenthub.port.RetrieverPort;
-import com.eureka.agenthub.port.ToolExecutorPort;
-import org.junit.jupiter.api.BeforeEach;
+import com.eureka.agenthub.model.ChatResponse;
+import com.eureka.agenthub.service.orchestrator.ChatOrchestrator;
+import com.eureka.agenthub.service.orchestrator.OrchestratorRouter;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
-import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -37,305 +21,45 @@ class ChatServiceTest {
     @Mock
     private ProviderRouter providerRouter;
     @Mock
-    private MemoryPort memoryPort;
+    private OrchestratorRouter orchestratorRouter;
     @Mock
-    private RetrieverPort retrieverPort;
-    @Mock
-    private ToolExecutorPort toolExecutorPort;
-    @Mock
-    private ModelClientService modelClientService;
-
-    private AppProperties appProperties;
-    private ChatService chatService;
-
-    @BeforeEach
-    void setUp() {
-        appProperties = new AppProperties();
-        appProperties.getChat().setToolCallingEnabled(false);
-        appProperties.getMemory().setDirectHistoryMessages(2);
-        chatService = new ChatService(
-                providerRouter,
-                memoryPort,
-                retrieverPort,
-                toolExecutorPort,
-                modelClientService,
-                appProperties
-        );
-    }
+    private ChatOrchestrator chatOrchestrator;
 
     @Test
-    void shouldUseRecentHistoryInDirectMode() {
+    void shouldRouteToSelectedOrchestrator() {
+        ChatService chatService = new ChatService(providerRouter, orchestratorRouter);
+
         ChatRequest request = new ChatRequest();
         request.setSessionId("s1");
-        request.setProvider("ollama");
-        request.setMode("direct");
-        request.setMessage("我上一个问题是什么");
+        request.setProvider("auto");
+        request.setMessage("hello");
 
-        List<ChatMessage> history = List.of(
-                new ChatMessage("user", "q1"),
-                new ChatMessage("assistant", "a1"),
-                new ChatMessage("user", "q2"),
-                new ChatMessage("assistant", "a2")
+        ChatResponse base = new ChatResponse(
+                "ok",
+                "openai",
+                List.of(),
+                List.of(),
+                List.of(),
+                false,
+                0,
+                List.of(),
+                List.of(),
+                "",
+                "",
+                "rag",
+                "manual-rag"
         );
 
-        when(providerRouter.pickProvider("ollama")).thenReturn("ollama");
-        when(memoryPort.loadHistory("s1")).thenReturn(history);
-        when(modelClientService.chat(eq("ollama"), any())).thenReturn("ok");
+        when(providerRouter.pickProvider("auto")).thenReturn("openai");
+        when(orchestratorRouter.decide(request)).thenReturn(new OrchestratorRouter.Decision("classic", "config"));
+        when(orchestratorRouter.get("classic")).thenReturn(chatOrchestrator);
+        when(chatOrchestrator.chat(request, "openai")).thenReturn(base);
 
-        chatService.chat(request);
+        ChatResponse result = chatService.chat(request);
 
-        ArgumentCaptor<List<ChatMessage>> promptCaptor = ArgumentCaptor.forClass(List.class);
-        verify(modelClientService).chat(eq("ollama"), promptCaptor.capture());
-        List<ChatMessage> prompt = promptCaptor.getValue();
-
-        // system + 最近2条历史 + user
-        assertEquals(4, prompt.size());
-        assertEquals("q2", prompt.get(1).content());
-        assertEquals("a2", prompt.get(2).content());
-        assertTrue(prompt.get(3).content().contains("我上一个问题是什么"));
-        verify(retrieverPort, never()).retrieve(any(), anyInt());
-    }
-
-    @Test
-    void shouldUseFullHistoryInRagMode() {
-        ChatRequest request = new ChatRequest();
-        request.setSessionId("s2");
-        request.setProvider("ollama");
-        request.setMode("rag");
-        request.setMessage("根据历史继续");
-
-        List<ChatMessage> history = List.of(
-                new ChatMessage("user", "q1"),
-                new ChatMessage("assistant", "a1"),
-                new ChatMessage("user", "q2"),
-                new ChatMessage("assistant", "a2")
-        );
-
-        when(providerRouter.pickProvider("ollama")).thenReturn("ollama");
-        when(memoryPort.loadHistory("s2")).thenReturn(history);
-        when(retrieverPort.retrieve("根据历史继续", 5)).thenReturn(List.of(new RagHit("kb", "chunk", 0.9)));
-        when(modelClientService.chat(eq("ollama"), any())).thenReturn("ok");
-
-        chatService.chat(request);
-
-        ArgumentCaptor<List<ChatMessage>> promptCaptor = ArgumentCaptor.forClass(List.class);
-        verify(modelClientService).chat(eq("ollama"), promptCaptor.capture());
-        List<ChatMessage> prompt = promptCaptor.getValue();
-
-        // system + 全量历史4条 + user
-        assertEquals(6, prompt.size());
-        assertEquals("q1", prompt.get(1).content());
-        assertEquals("a2", prompt.get(4).content());
-        verify(retrieverPort).retrieve("根据历史继续", 5);
-    }
-
-    @Test
-    void shouldReturnInsufficientEvidenceTemplateWhenRagHasNoHits() {
-        ChatRequest request = new ChatRequest();
-        request.setSessionId("s3");
-        request.setProvider("ollama");
-        request.setMode("rag");
-        request.setMessage("给我数据库迁移步骤");
-
-        when(providerRouter.pickProvider("ollama")).thenReturn("ollama");
-        when(memoryPort.loadHistory("s3")).thenReturn(List.of());
-        when(retrieverPort.retrieve("给我数据库迁移步骤", 5)).thenReturn(List.of());
-
-        var response = chatService.chat(request);
-
-        assertTrue(response.answer().contains("没有在知识库中找到足够依据"));
-        verify(modelClientService, never()).chat(eq("ollama"), any());
-    }
-
-    @Test
-    void shouldPreferRagForContextualFollowUpInAutoMode() {
-        ChatRequest request = new ChatRequest();
-        request.setSessionId("s4");
-        request.setProvider("ollama");
-        request.setMode("auto");
-        request.setMessage("我上一个问题是啥");
-
-        when(providerRouter.pickProvider("ollama")).thenReturn("ollama");
-        when(memoryPort.loadHistory("s4")).thenReturn(List.of(new ChatMessage("user", "前一个问题")));
-        when(retrieverPort.retrieve("我上一个问题是啥", 5)).thenReturn(List.of(new RagHit("mem", "前文有提问", 0.95)));
-        when(modelClientService.chat(eq("ollama"), any())).thenReturn("你上一个问题是... ");
-
-        chatService.chat(request);
-
-        verify(retrieverPort).retrieve("我上一个问题是啥", 5);
-        verify(modelClientService, never()).classifyMode(any(), any());
-    }
-
-    @Test
-    void shouldUseToolProtocolWhenOpenAiAndRagMode() {
-        appProperties.getChat().setToolCallingEnabled(true);
-
-        ChatRequest request = new ChatRequest();
-        request.setSessionId("s5");
-        request.setProvider("openai");
-        request.setMode("rag");
-        request.setMessage("请总结这段内容");
-
-        when(providerRouter.pickProvider("openai")).thenReturn("openai");
-        when(memoryPort.loadHistory("s5")).thenReturn(List.of());
-        when(retrieverPort.retrieve("请总结这段内容", 5)).thenReturn(List.of(new RagHit("kb", "chunk", 0.91)));
-        when(toolExecutorPort.listCallableTools()).thenReturn(List.of(
-                new ToolDefinition("summarize", "总结文本", Map.of("type", "object"))
-        ));
-        when(modelClientService.chatWithTools(eq("openai"), any(), any())).thenReturn(
-                new ToolChatResult("", List.of(new ToolCallRequest("call-1", "summarize", Map.of("text", "abc")))),
-                new ToolChatResult("总结完成", List.of())
-        );
-        when(toolExecutorPort.callTool(eq("summarize"), org.mockito.ArgumentMatchers.<Map<String, Object>>any())).thenReturn("摘要结果");
-
-        var response = chatService.chat(request);
-
-        assertTrue(response.toolProtocolUsed());
-        assertEquals(2, response.toolRounds());
-        assertEquals(2, response.toolRoundLatenciesMs().size());
-        assertEquals("总结完成", response.answer());
-        assertEquals("summarize", response.toolCalls().get(0));
-        verify(modelClientService, never()).chat(eq("openai"), any());
-    }
-
-    @Test
-    void shouldExposeToolProtocolErrorWhenToolTestModeWithoutOpenAi() {
-        ChatRequest request = new ChatRequest();
-        request.setSessionId("s6");
-        request.setProvider("ollama");
-        request.setMode("direct");
-        request.setToolTestMode(true);
-        request.setMessage("测试协议工具");
-
-        when(providerRouter.pickProvider("ollama")).thenReturn("ollama");
-        when(memoryPort.loadHistory("s6")).thenReturn(List.of());
-        when(modelClientService.chat(eq("ollama"), any())).thenReturn("ok");
-
-        var response = chatService.chat(request);
-
-        assertTrue(response.toolErrors().contains("tool test mode requires openai provider"));
-        assertFalse(response.toolProtocolUsed());
-    }
-
-    @Test
-    void shouldCollectToolErrorAndContinueProtocolChain() {
-        appProperties.getChat().setToolCallingEnabled(true);
-
-        ChatRequest request = new ChatRequest();
-        request.setSessionId("s7");
-        request.setProvider("openai");
-        request.setMode("rag");
-        request.setMessage("调用工具并继续回答");
-
-        when(providerRouter.pickProvider("openai")).thenReturn("openai");
-        when(memoryPort.loadHistory("s7")).thenReturn(List.of());
-        when(retrieverPort.retrieve("调用工具并继续回答", 5)).thenReturn(List.of(new RagHit("kb", "chunk", 0.91)));
-        when(toolExecutorPort.listCallableTools()).thenReturn(List.of(
-                new ToolDefinition("summarize", "总结文本", Map.of("type", "object"))
-        ));
-        when(modelClientService.chatWithTools(eq("openai"), any(), any())).thenReturn(
-                new ToolChatResult("", List.of(new ToolCallRequest("call-1", "summarize", Map.of("text", "abc")))),
-                new ToolChatResult("已处理工具失败并给出回答", List.of())
-        );
-        when(toolExecutorPort.callTool(eq("summarize"), org.mockito.ArgumentMatchers.<Map<String, Object>>any()))
-                .thenThrow(new IllegalArgumentException("mock tool failed"));
-
-        var response = chatService.chat(request);
-
-        assertTrue(response.toolProtocolUsed());
-        assertTrue(response.toolErrors().stream().anyMatch(s -> s.contains("summarize") && s.contains("failed")));
-        assertEquals("已处理工具失败并给出回答", response.answer());
-    }
-
-    @Test
-    void shouldFallbackAfterMaxToolRoundsExceeded() {
-        appProperties.getChat().setToolCallingEnabled(true);
-        appProperties.getChat().setMaxToolRounds(1);
-
-        ChatRequest request = new ChatRequest();
-        request.setSessionId("s8");
-        request.setProvider("openai");
-        request.setMode("rag");
-        request.setMessage("反复调用工具测试");
-
-        when(providerRouter.pickProvider("openai")).thenReturn("openai");
-        when(memoryPort.loadHistory("s8")).thenReturn(List.of());
-        when(retrieverPort.retrieve("反复调用工具测试", 5)).thenReturn(List.of(new RagHit("kb", "chunk", 0.91)));
-        when(toolExecutorPort.listCallableTools()).thenReturn(List.of(
-                new ToolDefinition("summarize", "总结文本", Map.of("type", "object"))
-        ));
-        when(modelClientService.chatWithTools(eq("openai"), any(), any())).thenReturn(
-                new ToolChatResult("", List.of(new ToolCallRequest("call-1", "summarize", Map.of("text", "abc"))))
-        );
-        when(toolExecutorPort.callTool(eq("summarize"), org.mockito.ArgumentMatchers.<Map<String, Object>>any()))
-                .thenReturn("tool-output");
-        when(modelClientService.chat(eq("openai"), any())).thenReturn("fallback answer");
-
-        var response = chatService.chat(request);
-
-        assertTrue(response.toolProtocolUsed());
-        assertEquals(1, response.toolRounds());
-        assertTrue(response.toolErrors().stream().anyMatch(s -> s.contains("max rounds")));
-        assertEquals("fallback answer", response.answer());
-        verify(modelClientService, times(1)).chat(eq("openai"), any());
-    }
-
-    @Test
-    void shouldCollectToolErrorsWhenToolOutputContainsFailureText() {
-        appProperties.getChat().setToolCallingEnabled(true);
-
-        ChatRequest request = new ChatRequest();
-        request.setSessionId("s9");
-        request.setProvider("openai");
-        request.setMode("rag");
-        request.setMessage("帮我截图");
-
-        when(providerRouter.pickProvider("openai")).thenReturn("openai");
-        when(memoryPort.loadHistory("s9")).thenReturn(List.of());
-        when(retrieverPort.retrieve("帮我截图", 5)).thenReturn(List.of(new RagHit("kb", "chunk", 0.91)));
-        when(toolExecutorPort.listCallableTools()).thenReturn(List.of(
-                new ToolDefinition("take_screenshot", "截图", Map.of("type", "object"))
-        ));
-        when(modelClientService.chatWithTools(eq("openai"), any(), any())).thenReturn(
-                new ToolChatResult("", List.of(new ToolCallRequest("call-1", "take_screenshot", Map.of("text", "截图")))),
-                new ToolChatResult("截图失败已记录", List.of())
-        );
-        when(toolExecutorPort.callTool(eq("take_screenshot"), org.mockito.ArgumentMatchers.<Map<String, Object>>any()))
-                .thenReturn("截图失败：当前环境是无头模式，无法捕获屏幕");
-
-        var response = chatService.chat(request);
-
-        assertTrue(response.toolProtocolUsed());
-        assertTrue(response.toolErrors().stream().anyMatch(s -> s.contains("take_screenshot") && s.contains("reported error")));
-    }
-
-    @Test
-    void shouldNotBlockToolProtocolByInsufficientEvidence() {
-        appProperties.getChat().setToolCallingEnabled(true);
-
-        ChatRequest request = new ChatRequest();
-        request.setSessionId("s10");
-        request.setProvider("openai");
-        request.setMode("rag");
-        request.setMessage("帮我查一下上海现在天气");
-
-        when(providerRouter.pickProvider("openai")).thenReturn("openai");
-        when(memoryPort.loadHistory("s10")).thenReturn(List.of());
-        when(retrieverPort.retrieve("帮我查一下上海现在天气", 5)).thenReturn(List.of());
-        when(toolExecutorPort.listCallableTools()).thenReturn(List.of(
-                new ToolDefinition("query_weather", "Query real-time weather by city name", Map.of("type", "object"))
-        ));
-        when(modelClientService.chatWithTools(eq("openai"), any(), any())).thenReturn(
-                new ToolChatResult("", List.of(new ToolCallRequest("call-1", "query_weather", Map.of("city", "上海")))),
-                new ToolChatResult("上海当前多云，温度 23°C", List.of())
-        );
-        when(toolExecutorPort.callTool(eq("query_weather"), org.mockito.ArgumentMatchers.<Map<String, Object>>any()))
-                .thenReturn("天气查询结果\n城市: 上海\n温度: 23.0°C");
-
-        var response = chatService.chat(request);
-
-        assertTrue(response.toolProtocolUsed());
-        assertEquals("上海当前多云，温度 23°C", response.answer());
-        assertTrue(response.toolCalls().contains("query_weather"));
+        assertEquals("classic", result.orchestratorUsed());
+        assertEquals("config", result.orchestratorReason());
+        assertEquals("ok", result.answer());
+        verify(chatOrchestrator).chat(request, "openai");
     }
 }

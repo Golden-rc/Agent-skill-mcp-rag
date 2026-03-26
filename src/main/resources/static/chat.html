@@ -407,6 +407,14 @@
 
       <div class="row inline" style="margin-bottom:0; align-items:end;">
         <div>
+          <label for="orchestrator">编排器</label>
+          <select id="orchestrator">
+            <option value="auto" selected>auto（跟随后端配置）</option>
+            <option value="classic">classic</option>
+            <option value="agent">agent</option>
+          </select>
+        </div>
+        <div>
           <label for="toolTestMode">协议测试</label>
           <select id="toolTestMode">
             <option value="off" selected>关闭</option>
@@ -444,6 +452,7 @@
   const sessionIdInput = document.getElementById("sessionId");
   const providerSelect = document.getElementById("provider");
   const modeSelect = document.getElementById("mode");
+  const orchestratorSelect = document.getElementById("orchestrator");
   const toolTestModeSelect = document.getElementById("toolTestMode");
   const messageInput = document.getElementById("message");
 
@@ -850,12 +859,17 @@
         toolTestMode: toolTestModeSelect.value === "on",
         message: userInput
       };
+      if (orchestratorSelect.value !== "auto") {
+        payload.orchestrator = orchestratorSelect.value;
+      }
 
       const data = await api("/chat", { method: "POST", body: JSON.stringify(payload) });
       chatKpi.innerHTML =
         `<span class="tag">provider: ${esc(data.providerUsed || "-")}</span>` +
         `<span class="tag">mode: ${esc(data.modeUsed || "-")}</span>` +
         `<span class="tag">reason: ${esc(data.modeReason || "-")}</span>` +
+        `<span class="tag">orch: ${esc(data.orchestratorUsed || "-")}</span>` +
+        `<span class="tag">orchReason: ${esc(data.orchestratorReason || "-")}</span>` +
         `<span class="tag">tools: ${esc((data.toolCalls || []).join(", ") || "none")}</span>` +
         `<span class="tag">citations: ${(data.citations || []).length}</span>` +
         `<span class="tag">images: ${(data.imageUrls || []).length}</span>` +
@@ -877,6 +891,8 @@
         provider: data.providerUsed,
         modeUsed: data.modeUsed,
         modeReason: data.modeReason,
+        orchestratorUsed: data.orchestratorUsed,
+        orchestratorReason: data.orchestratorReason,
         toolCalls: data.toolCalls || [],
         toolProtocolUsed: Boolean(data.toolProtocolUsed),
         toolRounds: Number(data.toolRounds || 0),
@@ -885,6 +901,7 @@
         imageUrls: data.imageUrls || [],
         citations: (data.citations || []).length,
         requestMode: modeSelect.value,
+        requestOrchestrator: orchestratorSelect.value,
         toolTestMode: toolTestModeSelect.value,
         sessionId
       }, null, 2);

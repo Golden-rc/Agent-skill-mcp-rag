@@ -14,12 +14,12 @@ import java.util.Set;
  * 目标：在不引入复杂 token 计算的前提下，做去重、截断和预算控制，
  * 避免把冗余大段文本直接塞进 prompt 导致“中段丢失”和上下文噪声。
  */
-final class RagContextPacker {
+public final class RagContextPacker {
 
     private RagContextPacker() {
     }
 
-    static List<RagHit> pack(List<RagHit> hits, int maxTotalChars, int maxChunkChars) {
+    public static List<RagHit> pack(List<RagHit> hits, int maxTotalChars, int maxChunkChars) {
         if (hits == null || hits.isEmpty()) {
             return List.of();
         }

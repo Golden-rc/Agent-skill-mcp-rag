@@ -17,6 +17,8 @@ public class ChatRequest {
     private String provider = "auto";
     /** 回答模式：auto/direct/rag。 */
     private String mode = "auto";
+    /** 编排模式覆盖：classic/agent（可选）。 */
+    private String orchestrator = "";
     /** 前端测试开关：强制尝试 tools/tool_calls 协议链路。 */
     private boolean toolTestMode = false;
 
@@ -50,6 +52,14 @@ public class ChatRequest {
 
     public void setMode(String mode) {
         this.mode = mode;
+    }
+
+    public String getOrchestrator() {
+        return orchestrator;
+    }
+
+    public void setOrchestrator(String orchestrator) {
+        this.orchestrator = orchestrator;
     }
 
     public boolean isToolTestMode() {

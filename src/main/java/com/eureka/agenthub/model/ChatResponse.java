@@ -22,6 +22,10 @@ public record ChatResponse(String answer,
                            List<Long> toolRoundLatenciesMs,
                            // 协议链路中的工具错误摘要。
                            List<String> toolErrors,
+                           // 实际命中的编排器。
+                           String orchestratorUsed,
+                           // 编排器决策来源（request/config/fallback）。
+                           String orchestratorReason,
                            // 本次实际回答模式：direct / rag。
                            String modeUsed,
                            // 模式决策来源，便于前端调试。

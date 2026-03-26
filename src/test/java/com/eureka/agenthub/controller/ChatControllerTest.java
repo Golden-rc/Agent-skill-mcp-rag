@@ -43,6 +43,8 @@ class ChatControllerTest {
                 0,
                 List.of(),
                 List.of(),
+                "classic",
+                "config",
                 "rag",
                 "manual-rag"
         );
@@ -62,6 +64,7 @@ class ChatControllerTest {
                 .andExpect(jsonPath("$.providerUsed").value("openai"))
                 .andExpect(jsonPath("$.citations[0].source").value("kb"))
                 .andExpect(jsonPath("$.toolCalls[0]").value("extract_todos"))
+                .andExpect(jsonPath("$.orchestratorUsed").value("classic"))
                 .andExpect(jsonPath("$.modeUsed").value("rag"))
                 .andExpect(jsonPath("$.modeReason").value("manual-rag"));
     }
