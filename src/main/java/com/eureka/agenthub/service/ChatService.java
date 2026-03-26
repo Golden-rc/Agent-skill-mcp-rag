@@ -8,6 +8,9 @@ import com.eureka.agenthub.model.RagHit;
 import com.eureka.agenthub.model.ToolCallRequest;
 import com.eureka.agenthub.model.ToolChatResult;
 import com.eureka.agenthub.model.ToolDefinition;
+import com.eureka.agenthub.port.MemoryPort;
+import com.eureka.agenthub.port.RetrieverPort;
+import com.eureka.agenthub.port.ToolExecutorPort;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -36,24 +39,26 @@ public class ChatService {
             "You are an enterprise AI assistant. Answer in Chinese when user uses Chinese. " +
                     "If retrieval context exists, cite source names in the answer. " +
                     "For simple math or short factual questions, answer directly and do not force RAG context.";
+    private static final String ORCHESTRATOR_CLASSIC = "classic";
+    private static final String ORCHESTRATOR_AGENT = "agent";
 
     private final ProviderRouter providerRouter;
-    private final MemoryService memoryService;
-    private final RagService ragService;
-    private final McpClientService mcpClientService;
+    private final MemoryPort memoryPort;
+    private final RetrieverPort retrieverPort;
+    private final ToolExecutorPort toolExecutorPort;
     private final ModelClientService modelClientService;
     private final AppProperties appProperties;
 
     public ChatService(ProviderRouter providerRouter,
-                       MemoryService memoryService,
-                       RagService ragService,
-                       McpClientService mcpClientService,
+                       MemoryPort memoryPort,
+                       RetrieverPort retrieverPort,
+                       ToolExecutorPort toolExecutorPort,
                        ModelClientService modelClientService,
                        AppProperties appProperties) {
         this.providerRouter = providerRouter;
-        this.memoryService = memoryService;
-        this.ragService = ragService;
-        this.mcpClientService = mcpClientService;
+        this.memoryPort = memoryPort;
+        this.retrieverPort = retrieverPort;
+        this.toolExecutorPort = toolExecutorPort;
         this.modelClientService = modelClientService;
         this.appProperties = appProperties;
     }
@@ -62,6 +67,11 @@ public class ChatService {
         // 1) 选择模型提供方。
         String provider = providerRouter.pickProvider(request.getProvider());
         String userMessage = request.getMessage();
+        String orchestrator = normalizeOrchestrator(appProperties.getChat().getOrchestrator());
+        if (ORCHESTRATOR_AGENT.equals(orchestrator)) {
+            // P4 预埋：agent 编排暂未启用，先回退 classic，保证行为稳定。
+            log.info("orchestrator=agent is not enabled yet, fallback to classic");
+        }
         boolean contextualFollowUp = isContextualFollowUp(userMessage);
         String mode = normalizeMode(request.getMode());
         boolean screenshotIntent = isScreenshotIntent(userMessage);
@@ -76,7 +86,7 @@ public class ChatService {
         // 2) 两种模式都支持会话记忆。
         // - rag: 使用完整历史窗口。
         // - direct: 使用最近 N 条，既保留上下文连续性，又降低旧上下文污染。
-        List<ChatMessage> history = memoryService.loadHistory(request.getSessionId());
+        List<ChatMessage> history = memoryPort.loadHistory(request.getSessionId());
         if (directMode) {
             int directHistoryLimit = Math.max(0, appProperties.getMemory().getDirectHistoryMessages());
             history = takeLastMessages(history, directHistoryLimit);
@@ -85,7 +95,7 @@ public class ChatService {
         // 3) 严格直答跳过 RAG；知识库增强启用 RAG。
         List<RagHit> hits = directMode
                 ? Collections.emptyList()
-                : ragService.retrieve(userMessage, 5);
+                : retrieverPort.retrieve(userMessage, 5);
         List<RagHit> packedHits = RagContextPacker.pack(
                 hits,
                 appProperties.getRag().getContextMaxChars(),
@@ -106,8 +116,8 @@ public class ChatService {
         // 避免被 RAG 证据不足提前拦截。
         if (!directMode && !protocolEligible && isInsufficientEvidence(packedHits, contextualFollowUp)) {
             String answer = insufficientEvidenceAnswer(userMessage);
-            memoryService.append(request.getSessionId(), new ChatMessage("user", userMessage));
-            memoryService.append(request.getSessionId(), new ChatMessage("assistant", answer));
+            memoryPort.append(request.getSessionId(), new ChatMessage("user", userMessage));
+            memoryPort.append(request.getSessionId(), new ChatMessage("assistant", answer));
             return new ChatResponse(answer, provider, List.of(), toolCalls, imageUrls,
                     false, 0, toolRoundLatenciesMs, toolErrors, effectiveMode, "rule-insufficient-evidence");
         }
@@ -139,8 +149,8 @@ public class ChatService {
         }
 
         // 7) 写回会话记忆。
-        memoryService.append(request.getSessionId(), new ChatMessage("user", userMessage));
-        memoryService.append(request.getSessionId(), new ChatMessage("assistant", answer));
+        memoryPort.append(request.getSessionId(), new ChatMessage("user", userMessage));
+        memoryPort.append(request.getSessionId(), new ChatMessage("assistant", answer));
 
         log.info("chat result session={} provider={} mode={} reason={} protocolUsed={} rounds={} tools={} errors={}",
                 request.getSessionId(), provider, effectiveMode, modeDecision.reason(),
@@ -268,7 +278,7 @@ public class ChatService {
         String normalized = message.toLowerCase(Locale.ROOT);
         if (isScreenshotIntent(message)) {
             toolCalls.add("take_screenshot");
-            String toolOutput = mcpClientService.callTool("take_screenshot", message);
+            String toolOutput = toolExecutorPort.callTool("take_screenshot", Map.of("text", message));
             String imageUrl = extractPngUrl(toolOutput);
             if (!imageUrl.isBlank()) {
                 imageUrls.add(imageUrl);
@@ -278,11 +288,11 @@ public class ChatService {
         }
         if (normalized.contains("todo") || message.contains("待办") || message.contains("行动项")) {
             toolCalls.add("extract_todos");
-            return new ToolRouteResult(mcpClientService.callTool("extract_todos", message));
+            return new ToolRouteResult(toolExecutorPort.callTool("extract_todos", Map.of("text", message)));
         }
         if (normalized.contains("summary") || message.contains("总结") || message.contains("概括")) {
             toolCalls.add("summarize");
-            return new ToolRouteResult(mcpClientService.callTool("summarize", message));
+            return new ToolRouteResult(toolExecutorPort.callTool("summarize", Map.of("text", message)));
         }
         return ToolRouteResult.empty();
     }
@@ -332,7 +342,7 @@ public class ChatService {
                                                     List<String> imageUrls) {
         List<String> toolErrors = new ArrayList<>();
         List<Long> roundLatenciesMs = new ArrayList<>();
-        List<ToolDefinition> tools = mcpClientService.listCallableTools();
+        List<ToolDefinition> tools = toolExecutorPort.listCallableTools();
         if (tools.isEmpty()) {
             List<ChatMessage> prompt = new ArrayList<>();
             prompt.add(new ChatMessage("system", CHAT_SYSTEM_PROMPT));
@@ -388,7 +398,7 @@ public class ChatService {
                 String output;
                 boolean failedByException = false;
                 try {
-                    output = mcpClientService.callTool(call.name(), call.arguments());
+                    output = toolExecutorPort.callTool(call.name(), call.arguments());
                 } catch (Exception e) {
                     String error = "tool " + call.name() + " failed: " + (e.getMessage() == null ? "unknown" : e.getMessage());
                     toolErrors.add(error);
@@ -446,6 +456,14 @@ public class ChatService {
         } catch (Exception e) {
             return "{}";
         }
+    }
+
+    private String normalizeOrchestrator(String orchestrator) {
+        String value = orchestrator == null ? ORCHESTRATOR_CLASSIC : orchestrator.trim().toLowerCase(Locale.ROOT);
+        return switch (value) {
+            case ORCHESTRATOR_CLASSIC, ORCHESTRATOR_AGENT -> value;
+            default -> ORCHESTRATOR_CLASSIC;
+        };
     }
 
     private String buildUserPrompt(String userInput, List<RagHit> hits, String toolResult) {

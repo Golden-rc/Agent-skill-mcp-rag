@@ -156,6 +156,7 @@ Tool-calling protocol (OpenAI provider only by default):
 CHAT_TOOL_CALLING_ENABLED=true
 CHAT_TOOL_CALLING_OPENAI_ONLY=true
 CHAT_MAX_TOOL_ROUNDS=3
+CHAT_ORCHESTRATOR=classic
 ```
 
 Memory (both `direct` and `rag` modes use session history):

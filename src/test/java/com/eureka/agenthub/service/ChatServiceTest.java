@@ -7,6 +7,9 @@ import com.eureka.agenthub.model.RagHit;
 import com.eureka.agenthub.model.ToolCallRequest;
 import com.eureka.agenthub.model.ToolChatResult;
 import com.eureka.agenthub.model.ToolDefinition;
+import com.eureka.agenthub.port.MemoryPort;
+import com.eureka.agenthub.port.RetrieverPort;
+import com.eureka.agenthub.port.ToolExecutorPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -34,11 +37,11 @@ class ChatServiceTest {
     @Mock
     private ProviderRouter providerRouter;
     @Mock
-    private MemoryService memoryService;
+    private MemoryPort memoryPort;
     @Mock
-    private RagService ragService;
+    private RetrieverPort retrieverPort;
     @Mock
-    private McpClientService mcpClientService;
+    private ToolExecutorPort toolExecutorPort;
     @Mock
     private ModelClientService modelClientService;
 
@@ -52,9 +55,9 @@ class ChatServiceTest {
         appProperties.getMemory().setDirectHistoryMessages(2);
         chatService = new ChatService(
                 providerRouter,
-                memoryService,
-                ragService,
-                mcpClientService,
+                memoryPort,
+                retrieverPort,
+                toolExecutorPort,
                 modelClientService,
                 appProperties
         );
@@ -76,7 +79,7 @@ class ChatServiceTest {
         );
 
         when(providerRouter.pickProvider("ollama")).thenReturn("ollama");
-        when(memoryService.loadHistory("s1")).thenReturn(history);
+        when(memoryPort.loadHistory("s1")).thenReturn(history);
         when(modelClientService.chat(eq("ollama"), any())).thenReturn("ok");
 
         chatService.chat(request);
@@ -90,7 +93,7 @@ class ChatServiceTest {
         assertEquals("q2", prompt.get(1).content());
         assertEquals("a2", prompt.get(2).content());
         assertTrue(prompt.get(3).content().contains("我上一个问题是什么"));
-        verify(ragService, never()).retrieve(any(), anyInt());
+        verify(retrieverPort, never()).retrieve(any(), anyInt());
     }
 
     @Test
@@ -109,8 +112,8 @@ class ChatServiceTest {
         );
 
         when(providerRouter.pickProvider("ollama")).thenReturn("ollama");
-        when(memoryService.loadHistory("s2")).thenReturn(history);
-        when(ragService.retrieve("根据历史继续", 5)).thenReturn(List.of(new RagHit("kb", "chunk", 0.9)));
+        when(memoryPort.loadHistory("s2")).thenReturn(history);
+        when(retrieverPort.retrieve("根据历史继续", 5)).thenReturn(List.of(new RagHit("kb", "chunk", 0.9)));
         when(modelClientService.chat(eq("ollama"), any())).thenReturn("ok");
 
         chatService.chat(request);
@@ -123,7 +126,7 @@ class ChatServiceTest {
         assertEquals(6, prompt.size());
         assertEquals("q1", prompt.get(1).content());
         assertEquals("a2", prompt.get(4).content());
-        verify(ragService).retrieve("根据历史继续", 5);
+        verify(retrieverPort).retrieve("根据历史继续", 5);
     }
 
     @Test
@@ -135,8 +138,8 @@ class ChatServiceTest {
         request.setMessage("给我数据库迁移步骤");
 
         when(providerRouter.pickProvider("ollama")).thenReturn("ollama");
-        when(memoryService.loadHistory("s3")).thenReturn(List.of());
-        when(ragService.retrieve("给我数据库迁移步骤", 5)).thenReturn(List.of());
+        when(memoryPort.loadHistory("s3")).thenReturn(List.of());
+        when(retrieverPort.retrieve("给我数据库迁移步骤", 5)).thenReturn(List.of());
 
         var response = chatService.chat(request);
 
@@ -153,13 +156,13 @@ class ChatServiceTest {
         request.setMessage("我上一个问题是啥");
 
         when(providerRouter.pickProvider("ollama")).thenReturn("ollama");
-        when(memoryService.loadHistory("s4")).thenReturn(List.of(new ChatMessage("user", "前一个问题")));
-        when(ragService.retrieve("我上一个问题是啥", 5)).thenReturn(List.of(new RagHit("mem", "前文有提问", 0.95)));
+        when(memoryPort.loadHistory("s4")).thenReturn(List.of(new ChatMessage("user", "前一个问题")));
+        when(retrieverPort.retrieve("我上一个问题是啥", 5)).thenReturn(List.of(new RagHit("mem", "前文有提问", 0.95)));
         when(modelClientService.chat(eq("ollama"), any())).thenReturn("你上一个问题是... ");
 
         chatService.chat(request);
 
-        verify(ragService).retrieve("我上一个问题是啥", 5);
+        verify(retrieverPort).retrieve("我上一个问题是啥", 5);
         verify(modelClientService, never()).classifyMode(any(), any());
     }
 
@@ -174,16 +177,16 @@ class ChatServiceTest {
         request.setMessage("请总结这段内容");
 
         when(providerRouter.pickProvider("openai")).thenReturn("openai");
-        when(memoryService.loadHistory("s5")).thenReturn(List.of());
-        when(ragService.retrieve("请总结这段内容", 5)).thenReturn(List.of(new RagHit("kb", "chunk", 0.91)));
-        when(mcpClientService.listCallableTools()).thenReturn(List.of(
+        when(memoryPort.loadHistory("s5")).thenReturn(List.of());
+        when(retrieverPort.retrieve("请总结这段内容", 5)).thenReturn(List.of(new RagHit("kb", "chunk", 0.91)));
+        when(toolExecutorPort.listCallableTools()).thenReturn(List.of(
                 new ToolDefinition("summarize", "总结文本", Map.of("type", "object"))
         ));
         when(modelClientService.chatWithTools(eq("openai"), any(), any())).thenReturn(
                 new ToolChatResult("", List.of(new ToolCallRequest("call-1", "summarize", Map.of("text", "abc")))),
                 new ToolChatResult("总结完成", List.of())
         );
-        when(mcpClientService.callTool(eq("summarize"), org.mockito.ArgumentMatchers.<Map<String, Object>>any())).thenReturn("摘要结果");
+        when(toolExecutorPort.callTool(eq("summarize"), org.mockito.ArgumentMatchers.<Map<String, Object>>any())).thenReturn("摘要结果");
 
         var response = chatService.chat(request);
 
@@ -205,7 +208,7 @@ class ChatServiceTest {
         request.setMessage("测试协议工具");
 
         when(providerRouter.pickProvider("ollama")).thenReturn("ollama");
-        when(memoryService.loadHistory("s6")).thenReturn(List.of());
+        when(memoryPort.loadHistory("s6")).thenReturn(List.of());
         when(modelClientService.chat(eq("ollama"), any())).thenReturn("ok");
 
         var response = chatService.chat(request);
@@ -225,16 +228,16 @@ class ChatServiceTest {
         request.setMessage("调用工具并继续回答");
 
         when(providerRouter.pickProvider("openai")).thenReturn("openai");
-        when(memoryService.loadHistory("s7")).thenReturn(List.of());
-        when(ragService.retrieve("调用工具并继续回答", 5)).thenReturn(List.of(new RagHit("kb", "chunk", 0.91)));
-        when(mcpClientService.listCallableTools()).thenReturn(List.of(
+        when(memoryPort.loadHistory("s7")).thenReturn(List.of());
+        when(retrieverPort.retrieve("调用工具并继续回答", 5)).thenReturn(List.of(new RagHit("kb", "chunk", 0.91)));
+        when(toolExecutorPort.listCallableTools()).thenReturn(List.of(
                 new ToolDefinition("summarize", "总结文本", Map.of("type", "object"))
         ));
         when(modelClientService.chatWithTools(eq("openai"), any(), any())).thenReturn(
                 new ToolChatResult("", List.of(new ToolCallRequest("call-1", "summarize", Map.of("text", "abc")))),
                 new ToolChatResult("已处理工具失败并给出回答", List.of())
         );
-        when(mcpClientService.callTool(eq("summarize"), org.mockito.ArgumentMatchers.<Map<String, Object>>any()))
+        when(toolExecutorPort.callTool(eq("summarize"), org.mockito.ArgumentMatchers.<Map<String, Object>>any()))
                 .thenThrow(new IllegalArgumentException("mock tool failed"));
 
         var response = chatService.chat(request);
@@ -256,15 +259,15 @@ class ChatServiceTest {
         request.setMessage("反复调用工具测试");
 
         when(providerRouter.pickProvider("openai")).thenReturn("openai");
-        when(memoryService.loadHistory("s8")).thenReturn(List.of());
-        when(ragService.retrieve("反复调用工具测试", 5)).thenReturn(List.of(new RagHit("kb", "chunk", 0.91)));
-        when(mcpClientService.listCallableTools()).thenReturn(List.of(
+        when(memoryPort.loadHistory("s8")).thenReturn(List.of());
+        when(retrieverPort.retrieve("反复调用工具测试", 5)).thenReturn(List.of(new RagHit("kb", "chunk", 0.91)));
+        when(toolExecutorPort.listCallableTools()).thenReturn(List.of(
                 new ToolDefinition("summarize", "总结文本", Map.of("type", "object"))
         ));
         when(modelClientService.chatWithTools(eq("openai"), any(), any())).thenReturn(
                 new ToolChatResult("", List.of(new ToolCallRequest("call-1", "summarize", Map.of("text", "abc"))))
         );
-        when(mcpClientService.callTool(eq("summarize"), org.mockito.ArgumentMatchers.<Map<String, Object>>any()))
+        when(toolExecutorPort.callTool(eq("summarize"), org.mockito.ArgumentMatchers.<Map<String, Object>>any()))
                 .thenReturn("tool-output");
         when(modelClientService.chat(eq("openai"), any())).thenReturn("fallback answer");
 
@@ -288,16 +291,16 @@ class ChatServiceTest {
         request.setMessage("帮我截图");
 
         when(providerRouter.pickProvider("openai")).thenReturn("openai");
-        when(memoryService.loadHistory("s9")).thenReturn(List.of());
-        when(ragService.retrieve("帮我截图", 5)).thenReturn(List.of(new RagHit("kb", "chunk", 0.91)));
-        when(mcpClientService.listCallableTools()).thenReturn(List.of(
+        when(memoryPort.loadHistory("s9")).thenReturn(List.of());
+        when(retrieverPort.retrieve("帮我截图", 5)).thenReturn(List.of(new RagHit("kb", "chunk", 0.91)));
+        when(toolExecutorPort.listCallableTools()).thenReturn(List.of(
                 new ToolDefinition("take_screenshot", "截图", Map.of("type", "object"))
         ));
         when(modelClientService.chatWithTools(eq("openai"), any(), any())).thenReturn(
                 new ToolChatResult("", List.of(new ToolCallRequest("call-1", "take_screenshot", Map.of("text", "截图")))),
                 new ToolChatResult("截图失败已记录", List.of())
         );
-        when(mcpClientService.callTool(eq("take_screenshot"), org.mockito.ArgumentMatchers.<Map<String, Object>>any()))
+        when(toolExecutorPort.callTool(eq("take_screenshot"), org.mockito.ArgumentMatchers.<Map<String, Object>>any()))
                 .thenReturn("截图失败：当前环境是无头模式，无法捕获屏幕");
 
         var response = chatService.chat(request);
@@ -317,16 +320,16 @@ class ChatServiceTest {
         request.setMessage("帮我查一下上海现在天气");
 
         when(providerRouter.pickProvider("openai")).thenReturn("openai");
-        when(memoryService.loadHistory("s10")).thenReturn(List.of());
-        when(ragService.retrieve("帮我查一下上海现在天气", 5)).thenReturn(List.of());
-        when(mcpClientService.listCallableTools()).thenReturn(List.of(
+        when(memoryPort.loadHistory("s10")).thenReturn(List.of());
+        when(retrieverPort.retrieve("帮我查一下上海现在天气", 5)).thenReturn(List.of());
+        when(toolExecutorPort.listCallableTools()).thenReturn(List.of(
                 new ToolDefinition("query_weather", "Query real-time weather by city name", Map.of("type", "object"))
         ));
         when(modelClientService.chatWithTools(eq("openai"), any(), any())).thenReturn(
                 new ToolChatResult("", List.of(new ToolCallRequest("call-1", "query_weather", Map.of("city", "上海")))),
                 new ToolChatResult("上海当前多云，温度 23°C", List.of())
         );
-        when(mcpClientService.callTool(eq("query_weather"), org.mockito.ArgumentMatchers.<Map<String, Object>>any()))
+        when(toolExecutorPort.callTool(eq("query_weather"), org.mockito.ArgumentMatchers.<Map<String, Object>>any()))
                 .thenReturn("天气查询结果\n城市: 上海\n温度: 23.0°C");
 
         var response = chatService.chat(request);

@@ -22,6 +22,7 @@ spring:
 
 app:
   chat:
+    orchestrator: ${CHAT_ORCHESTRATOR:classic}
     tool-calling-enabled: ${CHAT_TOOL_CALLING_ENABLED:true}
     tool-calling-openai-only: ${CHAT_TOOL_CALLING_OPENAI_ONLY:true}
     max-tool-rounds: ${CHAT_MAX_TOOL_ROUNDS:3}

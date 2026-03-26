@@ -287,6 +287,8 @@ public class AppProperties {
     }
 
     public static class Chat {
+        /** 编排模式：classic / agent。 */
+        private String orchestrator = "classic";
         /** 是否启用协议化工具调用（tool_calls）。 */
         private boolean toolCallingEnabled = true;
         /** 当前仅在 openai provider 启用协议化工具调用。 */
@@ -316,6 +318,14 @@ public class AppProperties {
 
         public void setMaxToolRounds(int maxToolRounds) {
             this.maxToolRounds = maxToolRounds;
+        }
+
+        public String getOrchestrator() {
+            return orchestrator;
+        }
+
+        public void setOrchestrator(String orchestrator) {
+            this.orchestrator = orchestrator;
         }
     }
 }
