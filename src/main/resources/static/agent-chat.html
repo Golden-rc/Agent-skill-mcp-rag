@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agent 专区</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/common.css">
+  <style>
+    .panel { max-width: 980px; margin: 0 auto; }
+    .timeline { border: 1px solid var(--line); border-radius: 12px; padding: 12px; min-height: 280px; max-height: 58vh; overflow: auto; background: rgba(255,255,255,.03); display: grid; gap: 10px; }
+    .msg { border: 1px solid var(--line); border-radius: 10px; padding: 10px; white-space: pre-wrap; }
+    .msg.user { background: rgba(54,209,183,.15); }
+    .msg.assistant { background: rgba(255,255,255,.06); }
+    .composer { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: end; }
+    .meta { border: 1px solid var(--line); border-radius: 10px; padding: 9px; background: rgba(255,255,255,.04); font-size: .82rem; color: var(--muted); white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+<main class="wrap panel">
+  <section class="hero">
+    <h1>Agent 调试专区</h1>
+    <p>此页面固定走 `orchestrator=agent`，便于与 classic 对话页分离测试。</p>
+  </section>
+
+  <nav class="nav">
+    <a href="/">首页</a>
+    <a href="/chat.html">Classic Chat</a>
+    <a href="/agent-chat.html">Agent Chat</a>
+  </nav>
+
+  <section class="card">
+    <div class="row inline" style="margin-bottom:0;">
+      <div>
+        <label for="sessionId">Session ID</label>
+        <input id="sessionId" value="agent-ui-1">
+      </div>
+      <div>
+        <label for="provider">Provider</label>
+        <select id="provider">
+          <option value="openai" selected>openai</option>
+          <option value="auto">auto</option>
+          <option value="ollama">ollama</option>
+        </select>
+      </div>
+      <div>
+        <label for="mode">Mode</label>
+        <select id="mode">
+          <option value="auto" selected>auto</option>
+          <option value="direct">direct</option>
+          <option value="rag">rag</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="status" class="status"></div>
+    <div id="timeline" class="timeline"></div>
+
+    <div class="composer" style="margin-top:10px;">
+      <div class="row" style="margin-bottom:0;">
+        <label for="message">Message</label>
+        <textarea id="message" placeholder="例如：帮我查一下上海现在天气"></textarea>
+      </div>
+      <button id="sendBtn">发送</button>
+    </div>
+
+    <div id="meta" class="meta" style="margin-top:10px;">等待请求...</div>
+  </section>
+</main>
+
+<script src="/common.js"></script>
+<script>
+  const sendBtn = document.getElementById("sendBtn");
+  const sessionIdInput = document.getElementById("sessionId");
+  const providerSelect = document.getElementById("provider");
+  const modeSelect = document.getElementById("mode");
+  const messageInput = document.getElementById("message");
+  const timeline = document.getElementById("timeline");
+  const statusEl = document.getElementById("status");
+  const metaEl = document.getElementById("meta");
+
+  function addMsg(role, text) {
+    const div = document.createElement("div");
+    div.className = `msg ${role}`;
+    div.textContent = text;
+    timeline.appendChild(div);
+    timeline.scrollTop = timeline.scrollHeight;
+  }
+
+  sendBtn.addEventListener("click", async () => {
+    const message = messageInput.value.trim();
+    if (!message) {
+      setStatus(statusEl, "请输入消息", "error");
+      return;
+    }
+
+    addMsg("user", message);
+    setStatus(statusEl, "请求中...");
+
+    try {
+      const payload = {
+        sessionId: sessionIdInput.value.trim(),
+        provider: providerSelect.value,
+        mode: modeSelect.value,
+        orchestrator: "agent",
+        message
+      };
+      const data = await api("/chat", { method: "POST", body: JSON.stringify(payload) });
+      addMsg("assistant", data.answer || "");
+
+      metaEl.textContent = JSON.stringify({
+        orchestratorUsed: data.orchestratorUsed,
+        orchestratorReason: data.orchestratorReason,
+        providerUsed: data.providerUsed,
+        modeUsed: data.modeUsed,
+        modeReason: data.modeReason,
+        toolProtocolUsed: data.toolProtocolUsed,
+        toolRounds: data.toolRounds,
+        toolRoundLatenciesMs: data.toolRoundLatenciesMs,
+        toolCalls: data.toolCalls,
+        toolErrors: data.toolErrors
+      }, null, 2);
+
+      setStatus(statusEl, "请求成功", "ok");
+    } catch (e) {
+      addMsg("assistant", "请求失败: " + e.message);
+      setStatus(statusEl, e.message, "error");
+    }
+  });
+
+  messageInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      sendBtn.click();
+    }
+  });
+</script>
+</body>
+</html>

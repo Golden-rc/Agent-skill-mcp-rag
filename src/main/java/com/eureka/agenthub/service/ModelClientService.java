@@ -108,6 +108,17 @@ public class ModelClientService {
     }
 
     /**
+     * 暴露底层 LangChain4j ChatLanguageModel，供 agent 编排接入 AiServices。
+     */
+    public ChatLanguageModel chatModel(String provider) {
+        return switch (provider) {
+            case "ollama" -> ollamaChatModel;
+            case "openai" -> openAiChatModel;
+            default -> throw new IllegalArgumentException("unsupported provider: " + provider);
+        };
+    }
+
+    /**
      * 用于 auto 模式的意图分类。
      */
     public String classifyMode(String provider, String message) {
