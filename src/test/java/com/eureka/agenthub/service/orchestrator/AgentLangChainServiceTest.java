@@ -83,4 +83,34 @@ class AgentLangChainServiceTest {
 
         assertEquals(1, collector.toolErrors().size());
     }
+
+    @Test
+    void shouldInvokeSearchWebWithBoundedTopK() {
+        ToolExecutorPort toolExecutorPort = mock(ToolExecutorPort.class);
+        AgentLangChainService.ToolCallCollector collector = new AgentLangChainService.ToolCallCollector();
+        AgentLangChainService.AgentTools tools = new AgentLangChainService.AgentTools(toolExecutorPort, collector);
+
+        when(toolExecutorPort.callTool(eq("search_web"), eq(Map.of("query", "spring boot", "topK", 10))))
+                .thenReturn("ok");
+
+        String output = tools.searchWeb("spring boot", 99);
+
+        assertEquals("ok", output);
+        verify(toolExecutorPort).callTool("search_web", Map.of("query", "spring boot", "topK", 10));
+    }
+
+    @Test
+    void shouldInvokeCalendarTaskSyncWithSparseArgs() {
+        ToolExecutorPort toolExecutorPort = mock(ToolExecutorPort.class);
+        AgentLangChainService.ToolCallCollector collector = new AgentLangChainService.ToolCallCollector();
+        AgentLangChainService.AgentTools tools = new AgentLangChainService.AgentTools(toolExecutorPort, collector);
+
+        when(toolExecutorPort.callTool(eq("calendar_task_sync"), eq(Map.of("action", "list"))))
+                .thenReturn("tasks");
+
+        String output = tools.calendarTaskSync("list", "", "", "", "");
+
+        assertEquals("tasks", output);
+        verify(toolExecutorPort).callTool("calendar_task_sync", Map.of("action", "list"));
+    }
 }

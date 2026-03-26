@@ -107,7 +107,7 @@ public class AgentLangChainService {
 
     @SystemMessage("""
             You are an agent-style assistant.
-            Use tools proactively for weather/screenshot/todo/summary tasks.
+            Use tools proactively for weather/web/research/todo/summary tasks.
             If tool output is available, answer directly from tool output.
             Do not reply with 'please wait'.
             """)
@@ -157,6 +157,87 @@ public class AgentLangChainService {
                                @P("Maximum returned characters") Integer maxChars) {
             int safeMax = maxChars == null ? 2000 : Math.max(300, Math.min(maxChars, 10000));
             return invoke("web_fetch", Map.of("url", url, "maxChars", safeMax));
+        }
+
+        @Tool("Search web pages and return top result links")
+        public String searchWeb(@P("Search query") String query,
+                                @P("Result count") Integer topK) {
+            int safeTopK = topK == null ? 5 : Math.max(1, Math.min(topK, 10));
+            return invoke("search_web", Map.of("query", query, "topK", safeTopK));
+        }
+
+        @Tool("Read a webpage and return title/headings/links/main text")
+        public String readWebpageStructured(@P("Target URL") String url,
+                                            @P("Maximum main text characters") Integer maxChars) {
+            int safeMax = maxChars == null ? 3000 : Math.max(500, Math.min(maxChars, 12000));
+            return invoke("read_webpage_structured", Map.of("url", url, "maxChars", safeMax));
+        }
+
+        @Tool("Check URL status, latency and TLS summary")
+        public String urlHealthCheck(@P("Target URL") String url) {
+            return invoke("url_health_check", Map.of("url", url));
+        }
+
+        @Tool("Extract entities like URL/date/email/money/phone from text")
+        public String extractEntities(@P("Input text") String text) {
+            return invoke("extract_entities", Map.of("text", text == null ? "" : text));
+        }
+
+        @Tool("Summarize text with citation indexes")
+        public String summarizeWithCitations(@P("Input text") String text,
+                                             @P("Max bullets") Integer maxBullets) {
+            int safeBullets = maxBullets == null ? 3 : Math.max(1, Math.min(maxBullets, 8));
+            return invoke("summarize_with_citations", Map.of("text", text == null ? "" : text, "maxBullets", safeBullets));
+        }
+
+        @Tool("Extract first table from markdown/html text")
+        public String tableExtractor(@P("Table source text") String text,
+                                     @P("Output format csv or json") String format) {
+            String safeFormat = (format == null || format.isBlank()) ? "csv" : format;
+            return invoke("table_extractor", Map.of("text", text == null ? "" : text, "format", safeFormat));
+        }
+
+        @Tool("Create/list/complete/delete simple calendar tasks")
+        public String calendarTaskSync(@P("Action create|list|complete|delete") String action,
+                                       @P("Task title") String title,
+                                       @P("Task due time") String dueTime,
+                                       @P("Assignee") String assignee,
+                                       @P("Task id for update/delete") String id) {
+            Map<String, Object> args = new HashMap<>();
+            args.put("action", action == null ? "list" : action);
+            if (title != null && !title.isBlank()) {
+                args.put("title", title);
+            }
+            if (dueTime != null && !dueTime.isBlank()) {
+                args.put("dueTime", dueTime);
+            }
+            if (assignee != null && !assignee.isBlank()) {
+                args.put("assignee", assignee);
+            }
+            if (id != null && !id.isBlank()) {
+                args.put("id", id);
+            }
+            return invoke("calendar_task_sync", args);
+        }
+
+        @Tool("Call external HTTP APIs with host safety checks")
+        public String httpRequestSafe(@P("URL") String url,
+                                      @P("HTTP method") String method,
+                                      @P("Headers in JSON string") String headersJson,
+                                      @P("Request body") String body,
+                                      @P("Max response chars") Integer maxChars) {
+            int safeMax = maxChars == null ? 3000 : Math.max(300, Math.min(maxChars, 20000));
+            Map<String, Object> args = new HashMap<>();
+            args.put("url", url);
+            args.put("method", method == null || method.isBlank() ? "GET" : method);
+            if (headersJson != null && !headersJson.isBlank()) {
+                args.put("headers", headersJson);
+            }
+            if (body != null && !body.isBlank()) {
+                args.put("body", body);
+            }
+            args.put("maxChars", safeMax);
+            return invoke("http_request_safe", args);
         }
 
         @Tool("Translate text to target language")
@@ -249,6 +330,13 @@ public class AgentLangChainService {
                     || output.startsWith("翻译失败")
                     || output.startsWith("天气查询失败")
                     || output.startsWith("天气预报查询失败")
+                    || output.startsWith("网页搜索失败")
+                    || output.startsWith("结构化网页读取失败")
+                    || output.startsWith("URL 健康检查失败")
+                    || output.startsWith("实体提取失败")
+                    || output.startsWith("日程任务同步失败")
+                    || output.startsWith("表格提取失败")
+                    || output.startsWith("HTTP 请求失败")
                     || output.startsWith("截图失败")
                     || output.startsWith("待办提取失败")
                     || output.startsWith("摘要失败");
