@@ -97,10 +97,28 @@ curl -X POST http://localhost:8080/chat \
   }'
 ```
 
+Force agent orchestrator for one request:
+
+```bash
+curl -X POST http://localhost:8080/chat \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "sessionId":"agent-demo-1",
+    "provider":"openai",
+    "mode":"auto",
+    "orchestrator":"agent",
+    "message":"帮我查一下上海现在天气"
+  }'
+```
+
 `mode` options:
 - `auto`: short/simple question uses direct answer, others use RAG
-- `direct`: strict direct answer (skip history/RAG/tools)
+- `direct`: direct answer with recent session history
 - `rag`: force knowledge-enhanced answer
+
+`orchestrator` options:
+- `classic`: classic chat orchestration path
+- `agent`: agent orchestration path (requires `CHAT_AGENT_ENABLED=true`)
 
 Admin APIs for operations page:
 
@@ -157,8 +175,10 @@ CHAT_TOOL_CALLING_ENABLED=true
 CHAT_TOOL_CALLING_OPENAI_ONLY=true
 CHAT_MAX_TOOL_ROUNDS=3
 CHAT_ORCHESTRATOR=classic
-CHAT_AGENT_ENABLED=false
+CHAT_AGENT_ENABLED=true
 ```
+
+Agent path is now powered by LangChain4j (`AiServices + @Tool`) and executes tools through MCP via `ToolExecutorPort`.
 
 Memory (both `direct` and `rag` modes use session history):
 
@@ -195,6 +215,7 @@ docker exec agenthub-ollama ollama pull qwen2.5:1.5b
 - `mcp-skill-server` standalone skill server
 - `docker-compose.yml` local infra
 - `src/main/resources/static/chat.html` chat page
+- `src/main/resources/static/agent-chat.html` dedicated agent test page (always sends `orchestrator=agent`)
 - `src/main/resources/static/ingest.html` rag ingest page (text + file)
 - `src/main/resources/static/rag.html` rag management page
 - `src/main/resources/static/sessions.html` session management page
