@@ -12,11 +12,13 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
 
 /**
- * Agent 编排最小骨架。
+ * Agent 编排器。
  * <p>
- * P4 阶段先保证“路径分离且可运行”，P5 再接 langchain4j/langgraph4j 完整图编排。
+ * 当前通过 AgentLangChainService 接入 LangChain4j 工具调用链路，
+ * 与 classic 编排路径保持互斥，便于灰度验证与回退。
  */
 @Component
 public class AgentChatOrchestrator implements ChatOrchestrator {
@@ -26,6 +28,10 @@ public class AgentChatOrchestrator implements ChatOrchestrator {
     private static final String AGENT_SYSTEM_PROMPT =
             "You are an agent-style assistant. Keep answers concise and actionable. " +
                     "When context is insufficient, ask one clarifying question.";
+    private static final Pattern FAILURE_STYLE_PATTERN = Pattern.compile(
+            "(技术问题|暂时无法|稍后再试|technical issue|temporarily unavailable|try again later)",
+            Pattern.CASE_INSENSITIVE
+    );
 
     private final MemoryPort memoryPort;
     private final ModelClientService modelClientService;
@@ -60,14 +66,16 @@ public class AgentChatOrchestrator implements ChatOrchestrator {
         String answer;
         int rounds = 0;
         if (protocolEnabled) {
+            // OpenAI 下使用 LangChain4j agent + MCP tools。
             AgentLangChainService.AgentRunResult result = agentLangChainService.run(provider, history, request.getMessage());
-            answer = result.answer();
+            answer = normalizeFinalAnswer(result);
             rounds = result.rounds();
             toolCalls.addAll(result.toolCalls());
             toolErrors.addAll(result.toolErrors());
             imageUrls.addAll(result.imageUrls());
             roundLatenciesMs.add(result.latencyMs());
         } else {
+            // 非 OpenAI 或关闭工具协议时，回退纯文本 agent 回答。
             List<ChatMessage> prompt = new ArrayList<>();
             prompt.add(new ChatMessage("system", AGENT_SYSTEM_PROMPT));
             prompt.addAll(history);
@@ -96,5 +104,22 @@ public class AgentChatOrchestrator implements ChatOrchestrator {
                 "agent",
                 protocolEnabled ? "agent-tool-protocol" : "agent-direct"
         );
+    }
+
+    private String normalizeFinalAnswer(AgentLangChainService.AgentRunResult result) {
+        if (result.answer() == null || result.answer().isBlank()) {
+            return result.lastToolOutput();
+        }
+        if (!result.toolErrors().isEmpty()) {
+            return result.answer();
+        }
+        if (result.lastToolOutput() == null || result.lastToolOutput().isBlank()) {
+            return result.answer();
+        }
+        if (!FAILURE_STYLE_PATTERN.matcher(result.answer()).find()) {
+            return result.answer();
+        }
+        // 工具成功时，优先返回工具产出，避免模型误生成“技术问题”类文案。
+        return result.lastToolOutput();
     }
 }

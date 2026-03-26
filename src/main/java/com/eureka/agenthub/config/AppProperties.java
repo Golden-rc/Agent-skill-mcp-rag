@@ -80,7 +80,7 @@ public class AppProperties {
         /** API Key（支持 BigModel 的 id.secret）。 */
         private String apiKey = "";
         /** 对话模型名称。 */
-        private String chatModel = "gpt-4o-mini";
+        private String chatModel = "GLM-4.6V";
 
         public String getBaseUrl() {
             return baseUrl;

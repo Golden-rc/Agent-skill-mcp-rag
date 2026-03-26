@@ -16,6 +16,10 @@
     .msg.assistant { background: rgba(255,255,255,.06); }
     .composer { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: end; }
     .meta { border: 1px solid var(--line); border-radius: 10px; padding: 9px; background: rgba(255,255,255,.04); font-size: .82rem; color: var(--muted); white-space: pre-wrap; }
+    .run-log { border: 1px solid var(--line); border-radius: 10px; padding: 10px; background: rgba(255,255,255,.03); max-height: 36vh; overflow: auto; display: grid; gap: 8px; }
+    .run-card { border: 1px solid var(--line); border-radius: 9px; padding: 8px; background: rgba(255,255,255,.04); }
+    .run-head { font-size: .8rem; color: var(--muted); margin-bottom: 4px; }
+    .run-lines { white-space: pre-wrap; font-size: .83rem; line-height: 1.4; }
   </style>
 </head>
 <body>
@@ -67,6 +71,7 @@
     </div>
 
     <div id="meta" class="meta" style="margin-top:10px;">等待请求...</div>
+    <div id="runLog" class="run-log" style="margin-top:10px;"></div>
   </section>
 </main>
 
@@ -80,6 +85,8 @@
   const timeline = document.getElementById("timeline");
   const statusEl = document.getElementById("status");
   const metaEl = document.getElementById("meta");
+  const runLogEl = document.getElementById("runLog");
+  const runRecords = [];
 
   function addMsg(role, text) {
     const div = document.createElement("div");
@@ -87,6 +94,81 @@
     div.textContent = text;
     timeline.appendChild(div);
     timeline.scrollTop = timeline.scrollHeight;
+    return div;
+  }
+
+  function nowTs() {
+    return new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  }
+
+  function renderRunLog() {
+    if (runRecords.length === 0) {
+      runLogEl.textContent = "执行流程可视化：等待请求...";
+      return;
+    }
+    runLogEl.innerHTML = runRecords.map((r) => `
+      <div class="run-card">
+        <div class="run-head">#${r.id} · ${r.startedAt} · ${r.status}</div>
+        <div class="run-lines">${esc(r.lines.join("\n"))}</div>
+      </div>
+    `).join("");
+  }
+
+  function createRunRecord(message) {
+    const rec = {
+      id: runRecords.length + 1,
+      startedAt: nowTs(),
+      status: "running",
+      lines: [`[${nowTs()}] 用户输入: ${message}`]
+    };
+    runRecords.unshift(rec);
+    if (runRecords.length > 30) {
+      runRecords.pop();
+    }
+    renderRunLog();
+    return {
+      line(text) {
+        rec.lines.push(`[${nowTs()}] ${text}`);
+        renderRunLog();
+      },
+      done(text) {
+        if (text) rec.lines.push(`[${nowTs()}] ${text}`);
+        rec.status = "done";
+        renderRunLog();
+      },
+      fail(text) {
+        rec.lines.push(`[${nowTs()}] ${text}`);
+        rec.status = "failed";
+        renderRunLog();
+      }
+    };
+  }
+
+  function startAgentProgress(statusNode, assistantNode, onPhase) {
+    const started = Date.now();
+    const phases = ["正在路由编排器", "正在调用模型", "正在尝试工具", "正在整理答案"];
+    let tick = 0;
+    let phaseIndex = -1;
+
+    const timer = setInterval(() => {
+      tick += 1;
+      const elapsed = Math.floor((Date.now() - started) / 1000);
+      const currentIndex = Math.min(phases.length - 1, Math.floor(elapsed / 4));
+      const phase = phases[currentIndex];
+      if (currentIndex !== phaseIndex) {
+        phaseIndex = currentIndex;
+        if (onPhase) onPhase(phase);
+      }
+      setStatus(statusNode, `Agent 执行中 · ${phase} · ${elapsed}s`);
+      if (assistantNode) {
+        const dots = ".".repeat((tick % 3) + 1);
+        assistantNode.textContent = `思考中${dots}\n${phase} (${elapsed}s)`;
+      }
+    }, 1000);
+
+    return () => {
+      clearInterval(timer);
+    };
   }
 
   sendBtn.addEventListener("click", async () => {
@@ -97,7 +179,12 @@
     }
 
     addMsg("user", message);
-    setStatus(statusEl, "请求中...");
+    const assistantNode = addMsg("assistant", "思考中...");
+    const run = createRunRecord(message);
+    run.line("请求已发送到 /chat");
+    const stopProgress = startAgentProgress(statusEl, assistantNode, (phase) => {
+      run.line(`阶段: ${phase}`);
+    });
 
     try {
       const payload = {
@@ -108,7 +195,14 @@
         message
       };
       const data = await api("/chat", { method: "POST", body: JSON.stringify(payload) });
-      addMsg("assistant", data.answer || "");
+      assistantNode.textContent = data.answer || "";
+      run.line(`协议: ${data.toolProtocolUsed ? "tool_calls" : "plain"}`);
+      run.line(`工具: ${(data.toolCalls || []).join(", ") || "none"}`);
+      run.line(`回合: ${Number(data.toolRounds || 0)} · 延迟: ${((data.toolRoundLatenciesMs || []).join("/") || "-")}ms`);
+      if ((data.toolErrors || []).length > 0) {
+        run.line(`工具错误: ${(data.toolErrors || []).join(" | ")}`);
+      }
+      run.done("响应完成");
 
       metaEl.textContent = JSON.stringify({
         orchestratorUsed: data.orchestratorUsed,
@@ -125,10 +219,15 @@
 
       setStatus(statusEl, "请求成功", "ok");
     } catch (e) {
-      addMsg("assistant", "请求失败: " + e.message);
+      assistantNode.textContent = "请求失败: " + e.message;
       setStatus(statusEl, e.message, "error");
+      run.fail("请求失败: " + e.message);
+    } finally {
+      stopProgress();
     }
   });
+
+  renderRunLog();
 
   messageInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey) {

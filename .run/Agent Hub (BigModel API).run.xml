@@ -25,7 +25,7 @@
       <option name="environmentProperties">
         <map>
           <entry key="OPENAI_BASE_URL" value="https://open.bigmodel.cn/api/paas/v4" />
-          <entry key="OPENAI_CHAT_MODEL" value="glm-4" />
+          <entry key="OPENAI_CHAT_MODEL" value="GLM-4.6V" />
           <entry key="OPENAI_API_KEY" value="${OPENAI_API_KEY}" />
         </map>
       </option>

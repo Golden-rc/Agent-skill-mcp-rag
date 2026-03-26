@@ -48,7 +48,7 @@ app:
   openai:
     base-url: ${OPENAI_BASE_URL:https://api.openai.com/v1}
     api-key: ${OPENAI_API_KEY:}
-    chat-model: ${OPENAI_CHAT_MODEL:gpt-4o-mini}
+    chat-model: ${OPENAI_CHAT_MODEL:GLM-4.6V}
   mcp:
     base-url: ${MCP_BASE_URL:http://localhost:8090}
   memory:

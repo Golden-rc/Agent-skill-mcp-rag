@@ -137,7 +137,7 @@ If you want cloud model routing via BigModel, set in `.env` (or shell env):
 ```bash
 OPENAI_BASE_URL=https://open.bigmodel.cn/api/paas/v4
 OPENAI_API_KEY=your_bigmodel_api_key
-OPENAI_CHAT_MODEL=glm-4-flash
+OPENAI_CHAT_MODEL=GLM-4.6V
 ```
 
 The app loads `.env` automatically at startup.

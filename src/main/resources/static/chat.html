@@ -749,6 +749,25 @@
     return { wrap, body };
   }
 
+  function startAgentProgress(statusNode, assistantNode) {
+    const started = Date.now();
+    const phases = ["路由请求", "模型思考", "工具调用", "整理答案"];
+    let tick = 0;
+
+    const timer = setInterval(() => {
+      tick += 1;
+      const elapsed = Math.floor((Date.now() - started) / 1000);
+      const phase = phases[Math.min(phases.length - 1, Math.floor(elapsed / 4))];
+      setStatus(statusNode, `执行中 · ${phase} · ${elapsed}s`);
+      if (assistantNode) {
+        const dots = ".".repeat((tick % 3) + 1);
+        assistantNode.textContent = `思考中${dots}\n${phase} (${elapsed}s)`;
+      }
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }
+
   function clearTimeline() {
     timeline.innerHTML = "";
   }
@@ -836,6 +855,7 @@
 
   chatBtn.addEventListener("click", async () => {
     if (isSending) return;
+    let stopProgress = () => {};
     try {
       isSending = true;
       setStatus(chatStatus, "请求中...");
@@ -852,6 +872,7 @@
       const userMsg = appendMessage("user", "");
       renderRichMessage(userMsg.body, userInput);
       const assistantEl = appendMessage("assistant", "思考中...");
+      stopProgress = startAgentProgress(chatStatus, assistantEl.body);
 
       const payload = {
         sessionId,
@@ -865,6 +886,7 @@
       }
 
       const data = await api("/chat", { method: "POST", body: JSON.stringify(payload) });
+      stopProgress();
       chatKpi.innerHTML =
         `<span class="tag">provider: ${esc(data.providerUsed || "-")}</span>` +
         `<span class="tag">mode: ${esc(data.modeUsed || "-")}</span>` +
@@ -918,10 +940,12 @@
       setStatus(chatStatus, "请求成功", "ok");
       await loadSessionList();
     } catch (e) {
+      stopProgress();
       setStatus(chatStatus, e.message, "error");
       const errMsg = appendMessage("assistant", "");
       renderRichMessage(errMsg.body, "请求失败，请检查 API Key / 服务状态。\n" + e.message);
     } finally {
+      stopProgress();
       isSending = false;
     }
   });

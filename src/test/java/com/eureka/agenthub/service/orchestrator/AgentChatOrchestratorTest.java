@@ -4,54 +4,47 @@ import com.eureka.agenthub.config.AppProperties;
 import com.eureka.agenthub.model.ChatMessage;
 import com.eureka.agenthub.model.ChatRequest;
 import com.eureka.agenthub.port.MemoryPort;
-import com.eureka.agenthub.service.ModelClientService;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
-@ExtendWith(MockitoExtension.class)
 class AgentChatOrchestratorTest {
-
-    @Mock
-    private MemoryPort memoryPort;
-    @Mock
-    private ModelClientService modelClientService;
-    @Mock
-    private AgentLangChainService agentLangChainService;
 
     @Test
     void shouldUseToolProtocolInAgentModeForOpenAi() {
-        AppProperties properties = new AppProperties();
-        properties.getChat().setToolCallingEnabled(true);
-
-        AgentChatOrchestrator orchestrator = new AgentChatOrchestrator(memoryPort, modelClientService, properties, agentLangChainService);
-
-        ChatRequest request = new ChatRequest();
-        request.setSessionId("agent-s1");
-        request.setMessage("帮我看看上海天气");
-
-        when(memoryPort.loadHistory("agent-s1")).thenReturn(List.of(new ChatMessage("user", "hello")));
-        when(agentLangChainService.run(eq("openai"), any(), eq("帮我看看上海天气"))).thenReturn(
-                new AgentLangChainService.AgentRunResult(
+        MemoryPort memoryPort = mock(MemoryPort.class);
+        AgentLangChainService agentLangChainService = new AgentLangChainService(null, null) {
+            @Override
+            public AgentRunResult run(String provider, List<ChatMessage> history, String userInput) {
+                return new AgentRunResult(
                         "上海当前多云，23°C",
                         List.of("query_weather"),
                         List.of(),
                         List.of(),
                         1200,
                         1,
-                        true
-                )
-        );
+                        true,
+                        "上海当前多云，23°C"
+                );
+            }
+        };
+        AppProperties properties = new AppProperties();
+        properties.getChat().setToolCallingEnabled(true);
+
+        AgentChatOrchestrator orchestrator = new AgentChatOrchestrator(memoryPort, null, properties, agentLangChainService);
+
+        ChatRequest request = new ChatRequest();
+        request.setSessionId("agent-s1");
+        request.setMessage("帮我看看上海天气");
+
+        org.mockito.Mockito.when(memoryPort.loadHistory("agent-s1")).thenReturn(List.of(new ChatMessage("user", "hello")));
 
         var resp = orchestrator.chat(request, "openai");
 
@@ -59,5 +52,40 @@ class AgentChatOrchestratorTest {
         assertTrue(resp.toolCalls().contains("query_weather"));
         assertEquals("上海当前多云，23°C", resp.answer());
         verify(memoryPort, times(2)).append(eq("agent-s1"), any(ChatMessage.class));
+    }
+
+    @Test
+    void shouldFallbackToToolOutputWhenModelUsesFailureStyleText() {
+        MemoryPort memoryPort = mock(MemoryPort.class);
+        AgentLangChainService agentLangChainService = new AgentLangChainService(null, null) {
+            @Override
+            public AgentRunResult run(String provider, List<ChatMessage> history, String userInput) {
+                return new AgentRunResult(
+                        "抱歉，翻译功能目前遇到了技术问题。",
+                        List.of("translate_text"),
+                        List.of(),
+                        List.of(),
+                        900,
+                        1,
+                        true,
+                        "翻译结果\n结果: 这是一只猫"
+                );
+            }
+        };
+        AppProperties properties = new AppProperties();
+        properties.getChat().setToolCallingEnabled(true);
+
+        AgentChatOrchestrator orchestrator = new AgentChatOrchestrator(memoryPort, null, properties, agentLangChainService);
+
+        ChatRequest request = new ChatRequest();
+        request.setSessionId("agent-s2");
+        request.setMessage("翻译：this is a cat");
+
+        org.mockito.Mockito.when(memoryPort.loadHistory("agent-s2")).thenReturn(List.of());
+
+        var resp = orchestrator.chat(request, "openai");
+
+        assertEquals("翻译结果\n结果: 这是一只猫", resp.answer());
+        assertTrue(resp.toolErrors().isEmpty());
     }
 }
