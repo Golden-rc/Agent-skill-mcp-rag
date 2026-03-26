@@ -118,6 +118,30 @@ class ClassicChatOrchestratorTest {
     }
 
     @Test
+    void shouldSkipRetrievalWhenToolTestModeForOpenAi() {
+        appProperties.getChat().setToolCallingEnabled(true);
+
+        ChatRequest request = new ChatRequest();
+        request.setSessionId("s5");
+        request.setMode("rag");
+        request.setToolTestMode(true);
+        request.setMessage("帮我查看baidu.com");
+
+        when(memoryPort.loadHistory("s5")).thenReturn(List.of());
+        when(toolExecutorPort.listCallableTools()).thenReturn(List.of(
+                new ToolDefinition("web_fetch", "抓取网页", Map.of("type", "object"))
+        ));
+        when(modelClientService.chatWithTools(eq("openai"), any(), any())).thenReturn(
+                new ToolChatResult("网页摘要", List.of())
+        );
+
+        var response = orchestrator.chat(request, "openai");
+
+        assertTrue(response.toolProtocolUsed());
+        verify(retrieverPort, never()).retrieve(any(), anyInt());
+    }
+
+    @Test
     void shouldReturnToolModeErrorWhenTestModeAndNotOpenAi() {
         ChatRequest request = new ChatRequest();
         request.setSessionId("s4");

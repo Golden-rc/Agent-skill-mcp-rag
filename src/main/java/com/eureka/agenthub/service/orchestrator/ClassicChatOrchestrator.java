@@ -72,6 +72,9 @@ public class ClassicChatOrchestrator implements ChatOrchestrator {
                 : new ModeDecision(mode, "manual-" + mode);
         String effectiveMode = modeDecision.mode();
         boolean directMode = "direct".equals(effectiveMode);
+        boolean forceToolProtocol = request.isToolTestMode();
+        boolean protocolEligible = shouldUseToolProtocol(provider, forceToolProtocol)
+                && (!directMode || screenshotIntent || forceToolProtocol);
 
         List<ChatMessage> history = memoryPort.loadHistory(request.getSessionId());
         if (directMode) {
@@ -79,9 +82,11 @@ public class ClassicChatOrchestrator implements ChatOrchestrator {
             history = takeLastMessages(history, directHistoryLimit);
         }
 
+        // 协议测试模式用于强制验证 tools/tool_calls；此时跳过 RAG 检索，避免 embedding 计费或资源不足导致链路被提前打断。
+        boolean skipRetrieval = forceToolProtocol && protocolEligible;
         List<RagHit> hits = directMode
                 ? Collections.emptyList()
-                : retrieverPort.retrieve(userMessage, 5);
+                : (skipRetrieval ? Collections.emptyList() : retrieverPort.retrieve(userMessage, 5));
         List<RagHit> packedHits = RagContextPacker.pack(
                 hits,
                 appProperties.getRag().getContextMaxChars(),
@@ -94,9 +99,6 @@ public class ClassicChatOrchestrator implements ChatOrchestrator {
         List<Long> toolRoundLatenciesMs = new ArrayList<>();
         boolean toolProtocolUsed = false;
         int toolRounds = 0;
-        boolean protocolEligible = shouldUseToolProtocol(provider, request.isToolTestMode())
-                && (!directMode || screenshotIntent || request.isToolTestMode());
-
         if (!directMode && !protocolEligible && isInsufficientEvidence(packedHits, contextualFollowUp)) {
             String answer = insufficientEvidenceAnswer();
             memoryPort.append(request.getSessionId(), new ChatMessage("user", userMessage));
