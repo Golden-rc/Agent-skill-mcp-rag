@@ -10,10 +10,13 @@ import dev.langchain4j.service.SystemMessage;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.regex.Pattern;
 
@@ -31,6 +34,15 @@ public class AgentLangChainService {
             "(技术问题|暂时无法|稍后再试|technical issue|temporarily unavailable|try again later)",
             Pattern.CASE_INSENSITIVE
     );
+    private static final Set<String> INTERNET_TOOLS = Set.of(
+            "web_fetch",
+            "search_web",
+            "read_webpage_structured",
+            "url_health_check",
+            "http_request_safe",
+            "query_weather",
+            "query_weather_forecast"
+    );
 
     private final ModelClientService modelClientService;
     private final ToolExecutorPort toolExecutorPort;
@@ -44,16 +56,23 @@ public class AgentLangChainService {
     public AgentRunResult run(String provider,
                               List<ChatMessage> history,
                               String userInput) {
+        return run(provider, history, userInput, ToolPolicy.allowAll());
+    }
+
+    public AgentRunResult run(String provider,
+                              List<ChatMessage> history,
+                              String userInput,
+                              ToolPolicy toolPolicy) {
         // 每次请求都创建新的工具收集器，避免并发会话污染。
         ToolCallCollector collector = new ToolCallCollector();
-        AgentTools tools = new AgentTools(toolExecutorPort, collector);
+        AgentTools tools = new AgentTools(toolExecutorPort, collector, toolPolicy == null ? ToolPolicy.allowAll() : toolPolicy);
         AgentAssistant assistant = AiServices.builder(AgentAssistant.class)
                 .chatLanguageModel(modelClientService.chatModel(provider))
                 .tools(tools)
                 .build();
 
         long started = System.nanoTime();
-        String answer = assistant.chat(buildAgentInput(history, userInput));
+        String answer = assistant.chat(buildAgentInput(history, userInput, tools.policy()));
         long latency = (System.nanoTime() - started) / 1_000_000L;
         String normalizedAnswer = normalizeAnswer(answer, collector);
 
@@ -85,7 +104,7 @@ public class AgentLangChainService {
         return collector.lastSuccessfulOutput();
     }
 
-    private String buildAgentInput(List<ChatMessage> history, String userInput) {
+    private String buildAgentInput(List<ChatMessage> history, String userInput, ToolPolicy toolPolicy) {
         StringBuilder sb = new StringBuilder();
         if (history != null && !history.isEmpty()) {
             // 先注入最近上下文，帮助 agent 处理“继续/上一个问题”等追问。
@@ -100,6 +119,11 @@ public class AgentLangChainService {
                         .append("\n");
             }
             sb.append("\n");
+        }
+        if (!toolPolicy.allowedTools().isEmpty() || !toolPolicy.internetEnabled()) {
+            sb.append("Tool policy:\n");
+            sb.append("- internetEnabled: ").append(toolPolicy.internetEnabled()).append("\n");
+            sb.append("- allowedTools: ").append(toolPolicy.allowedTools().isEmpty() ? "(all)" : toolPolicy.allowedTools()).append("\n\n");
         }
         sb.append("User question: ").append(userInput);
         return sb.toString();
@@ -119,10 +143,16 @@ public class AgentLangChainService {
         private final ToolExecutorPort toolExecutorPort;
         private final ToolCallCollector collector;
         private final Map<String, String> memoizedResults = new HashMap<>();
+        private final ToolPolicy toolPolicy;
 
-        AgentTools(ToolExecutorPort toolExecutorPort, ToolCallCollector collector) {
+        AgentTools(ToolExecutorPort toolExecutorPort, ToolCallCollector collector, ToolPolicy toolPolicy) {
             this.toolExecutorPort = toolExecutorPort;
             this.collector = collector;
+            this.toolPolicy = toolPolicy == null ? ToolPolicy.allowAll() : toolPolicy;
+        }
+
+        ToolPolicy policy() {
+            return toolPolicy;
         }
 
         @Tool("Query current weather by city name")
@@ -249,6 +279,12 @@ public class AgentLangChainService {
         }
 
         private String invoke(String toolName, Map<String, Object> args) {
+            String policyDenied = checkPolicy(toolName);
+            if (!policyDenied.isBlank()) {
+                collector.record(toolName, policyDenied);
+                return policyDenied;
+            }
+
             String signature = buildSignature(toolName, args);
             // 同一轮 agent 推理中，重复同参工具调用直接复用结果，避免浪费配额或重复副作用。
             if (memoizedResults.containsKey(signature)) {
@@ -266,6 +302,16 @@ public class AgentLangChainService {
             String safeOutput = output == null ? "" : output;
             memoizedResults.put(signature, safeOutput);
             return safeOutput;
+        }
+
+        private String checkPolicy(String toolName) {
+            if (!toolPolicy.allowedTools().isEmpty() && !toolPolicy.allowedTools().contains(toolName)) {
+                return "tool " + toolName + " failed: blocked by allowedTools policy";
+            }
+            if (!toolPolicy.internetEnabled() && INTERNET_TOOLS.contains(toolName)) {
+                return "tool " + toolName + " failed: blocked by internetEnabled=false policy";
+            }
+            return "";
         }
 
         private String buildSignature(String toolName, Map<String, Object> args) {
@@ -372,5 +418,15 @@ public class AgentLangChainService {
                                  int rounds,
                                  boolean protocolUsed,
                                  String lastToolOutput) {
+    }
+
+    public record ToolPolicy(Set<String> allowedTools, boolean internetEnabled) {
+        public ToolPolicy {
+            allowedTools = allowedTools == null ? Collections.emptySet() : Collections.unmodifiableSet(new HashSet<>(allowedTools));
+        }
+
+        public static ToolPolicy allowAll() {
+            return new ToolPolicy(Set.of(), true);
+        }
     }
 }

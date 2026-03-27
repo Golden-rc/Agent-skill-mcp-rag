@@ -11,7 +11,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
@@ -67,7 +69,11 @@ public class AgentChatOrchestrator implements ChatOrchestrator {
         int rounds = 0;
         if (protocolEnabled) {
             // OpenAI 下使用 LangChain4j agent + MCP tools。
-            AgentLangChainService.AgentRunResult result = agentLangChainService.run(provider, history, request.getMessage());
+            AgentLangChainService.ToolPolicy toolPolicy = new AgentLangChainService.ToolPolicy(
+                    normalizeAllowedTools(request.getAllowedTools()),
+                    request.isInternetEnabled()
+            );
+            AgentLangChainService.AgentRunResult result = agentLangChainService.run(provider, history, request.getMessage(), toolPolicy);
             answer = normalizeFinalAnswer(result);
             rounds = result.rounds();
             toolCalls.addAll(result.toolCalls());
@@ -104,6 +110,23 @@ public class AgentChatOrchestrator implements ChatOrchestrator {
                 "agent",
                 protocolEnabled ? "agent-tool-protocol" : "agent-direct"
         );
+    }
+
+    private Set<String> normalizeAllowedTools(List<String> values) {
+        if (values == null || values.isEmpty()) {
+            return Set.of();
+        }
+        Set<String> out = new LinkedHashSet<>();
+        for (String value : values) {
+            if (value == null) {
+                continue;
+            }
+            String v = value.trim();
+            if (!v.isBlank()) {
+                out.add(v);
+            }
+        }
+        return out;
     }
 
     private String normalizeFinalAnswer(AgentLangChainService.AgentRunResult result) {

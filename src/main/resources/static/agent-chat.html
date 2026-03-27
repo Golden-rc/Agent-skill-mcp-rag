@@ -26,6 +26,11 @@
     .session-item.active { border-color: rgba(54,209,183,.6); background: rgba(54,209,183,.18); }
     .session-id { font-size: .82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .session-meta { font-size: .74rem; color: var(--muted); margin-top: 3px; }
+    .policy-box { border: 1px solid var(--line); border-radius: 10px; padding: 10px; background: rgba(255,255,255,.03); margin-top: 10px; }
+    .tool-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; max-height: 150px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; padding: 7px; background: rgba(255,255,255,.03); }
+    .tool-item { display: flex; align-items: center; gap: 6px; font-size: .82rem; color: var(--muted); }
+    .manual-box { border: 1px solid var(--line); border-radius: 10px; padding: 10px; background: rgba(255,255,255,.03); margin-top: 10px; display: grid; gap: 8px; }
+    .manual-out { border: 1px solid var(--line); border-radius: 8px; padding: 8px; min-height: 80px; max-height: 200px; overflow: auto; white-space: pre-wrap; font-size: .82rem; }
 
     @media (max-width: 980px) {
       .layout { grid-template-columns: 1fr; }
@@ -80,6 +85,43 @@
           </div>
         </div>
 
+        <div class="policy-box">
+          <div class="row inline" style="margin-bottom:8px; grid-template-columns: 1fr 1fr;">
+            <div>
+              <label for="toolControlMode">工具控制模式</label>
+              <select id="toolControlMode">
+                <option value="auto" selected>自动（不限制）</option>
+                <option value="controlled">受控（白名单）</option>
+              </select>
+            </div>
+            <div style="display:flex; align-items:end;">
+              <label class="tool-item" style="font-size:.9rem;color:var(--text);">
+                <input id="internetEnabled" type="checkbox" checked>
+                允许联网工具
+              </label>
+            </div>
+          </div>
+          <div>
+            <label>允许工具（受控模式生效）</label>
+            <div id="allowedTools" class="tool-grid"></div>
+          </div>
+        </div>
+
+        <div class="manual-box">
+          <div class="row inline" style="margin-bottom:0; grid-template-columns: 1fr 2fr auto; align-items:end;">
+            <div>
+              <label for="manualTool">手动调用工具</label>
+              <select id="manualTool"></select>
+            </div>
+            <div>
+              <label for="manualArgs">Arguments(JSON)</label>
+              <textarea id="manualArgs" placeholder='例如: {"url":"https://baidu.com"}'></textarea>
+            </div>
+            <button id="manualCallBtn" type="button">调用</button>
+          </div>
+          <div id="manualOut" class="manual-out">手动调用输出会显示在这里。</div>
+        </div>
+
         <div id="status" class="status"></div>
         <div id="timeline" class="timeline"></div>
 
@@ -112,8 +154,19 @@
   const sessionListEl = document.getElementById("sessionList");
   const newSessionBtn = document.getElementById("newSessionBtn");
   const refreshSessionsBtn = document.getElementById("refreshSessionsBtn");
+  const toolControlModeSelect = document.getElementById("toolControlMode");
+  const internetEnabledInput = document.getElementById("internetEnabled");
+  const allowedToolsEl = document.getElementById("allowedTools");
+  const manualToolSelect = document.getElementById("manualTool");
+  const manualArgsInput = document.getElementById("manualArgs");
+  const manualCallBtn = document.getElementById("manualCallBtn");
+  const manualOutEl = document.getElementById("manualOut");
   const SESSION_STORAGE_KEY = "agent.chat.session.id";
+  const TOOL_MODE_STORAGE_KEY = "agent.chat.tool.mode";
+  const INTERNET_STORAGE_KEY = "agent.chat.internet.enabled";
+  const ALLOWED_TOOLS_STORAGE_KEY = "agent.chat.allowed.tools";
   let activeSessionId = "";
+  let cachedTools = [];
   const runRecords = [];
 
   function addMsg(role, text) {
@@ -159,6 +212,80 @@
         </button>
       `;
     }).join("");
+  }
+
+  function renderAllowedTools(tools) {
+    if (!Array.isArray(tools) || tools.length === 0) {
+      allowedToolsEl.innerHTML = `<div class="small">暂无可用工具</div>`;
+      manualToolSelect.innerHTML = `<option value="">(none)</option>`;
+      return;
+    }
+    const selected = new Set(loadAllowedToolsFromStorage());
+    allowedToolsEl.innerHTML = tools.map((tool) => {
+      const checked = selected.has(tool.name) ? "checked" : "";
+      return `<label class="tool-item"><input type="checkbox" value="${esc(tool.name)}" ${checked}>${esc(tool.name)}</label>`;
+    }).join("");
+    manualToolSelect.innerHTML = tools.map((tool) => `<option value="${esc(tool.name)}">${esc(tool.name)}</option>`).join("");
+    if (!manualArgsInput.value.trim()) {
+      manualArgsInput.value = "{}";
+    }
+  }
+
+  function loadAllowedToolsFromStorage() {
+    try {
+      const raw = localStorage.getItem(ALLOWED_TOOLS_STORAGE_KEY);
+      if (!raw) {
+        return [];
+      }
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function getSelectedAllowedTools() {
+    return Array.from(allowedToolsEl.querySelectorAll("input[type='checkbox']:checked"))
+      .map((node) => node.value)
+      .filter(Boolean);
+  }
+
+  function persistToolPolicy() {
+    localStorage.setItem(TOOL_MODE_STORAGE_KEY, toolControlModeSelect.value);
+    localStorage.setItem(INTERNET_STORAGE_KEY, internetEnabledInput.checked ? "1" : "0");
+    localStorage.setItem(ALLOWED_TOOLS_STORAGE_KEY, JSON.stringify(getSelectedAllowedTools()));
+  }
+
+  function applyStoredToolPolicy() {
+    const mode = localStorage.getItem(TOOL_MODE_STORAGE_KEY);
+    if (mode === "controlled") {
+      toolControlModeSelect.value = "controlled";
+    }
+    const internet = localStorage.getItem(INTERNET_STORAGE_KEY);
+    if (internet === "0") {
+      internetEnabledInput.checked = false;
+    }
+  }
+
+  async function loadToolMetadata() {
+    try {
+      const rows = await api("/admin/mcp/tools");
+      cachedTools = (rows || []).filter((item) => item.enabled !== false);
+      renderAllowedTools(cachedTools);
+    } catch (e) {
+      allowedToolsEl.innerHTML = `<div class="small">工具列表加载失败: ${esc(e.message || "unknown")}</div>`;
+      manualToolSelect.innerHTML = `<option value="">(load failed)</option>`;
+    }
+  }
+
+  function attachToolPolicyIntoPayload(payload) {
+    if (toolControlModeSelect.value !== "controlled") {
+      payload.allowedTools = [];
+      payload.internetEnabled = true;
+      return;
+    }
+    payload.allowedTools = getSelectedAllowedTools();
+    payload.internetEnabled = internetEnabledInput.checked;
   }
 
   async function loadSessionList() {
@@ -290,10 +417,15 @@
         orchestrator: "agent",
         message
       };
+      attachToolPolicyIntoPayload(payload);
       const data = await api("/chat", { method: "POST", body: JSON.stringify(payload) });
       assistantNode.textContent = data.answer || "";
       run.line(`协议: ${data.toolProtocolUsed ? "tool_calls" : "plain"}`);
       run.line(`工具: ${(data.toolCalls || []).join(", ") || "none"}`);
+      if (payload.allowedTools && payload.allowedTools.length > 0) {
+        run.line(`白名单: ${payload.allowedTools.join(", ")}`);
+      }
+      run.line(`联网: ${payload.internetEnabled !== false ? "enabled" : "disabled"}`);
       run.line(`回合: ${Number(data.toolRounds || 0)} · 延迟: ${((data.toolRoundLatenciesMs || []).join("/") || "-")}ms`);
       if ((data.toolErrors || []).length > 0) {
         run.line(`工具错误: ${(data.toolErrors || []).join(" | ")}`);
@@ -315,6 +447,7 @@
 
       setStatus(statusEl, "请求成功", "ok");
       messageInput.value = "";
+      persistToolPolicy();
       await loadSessionList();
     } catch (e) {
       assistantNode.textContent = "请求失败: " + e.message;
@@ -351,7 +484,47 @@
     await switchSession(sessionId);
   });
 
+  allowedToolsEl.addEventListener("change", () => {
+    persistToolPolicy();
+  });
+
+  toolControlModeSelect.addEventListener("change", () => {
+    persistToolPolicy();
+  });
+
+  internetEnabledInput.addEventListener("change", () => {
+    persistToolPolicy();
+  });
+
+  manualCallBtn.addEventListener("click", async () => {
+    const toolName = manualToolSelect.value;
+    if (!toolName) {
+      manualOutEl.textContent = "请选择工具";
+      return;
+    }
+    let args = {};
+    try {
+      args = JSON.parse(manualArgsInput.value || "{}");
+    } catch (e) {
+      manualOutEl.textContent = "JSON 解析失败: " + e.message;
+      return;
+    }
+
+    manualOutEl.textContent = "调用中...";
+    try {
+      const data = await api("/admin/mcp/call", {
+        method: "POST",
+        body: JSON.stringify({ name: toolName, arguments: args })
+      });
+      manualOutEl.textContent = data.output || "(empty)";
+    } catch (e) {
+      manualOutEl.textContent = "调用失败: " + e.message;
+    }
+  });
+
   async function init() {
+    applyStoredToolPolicy();
+    await loadToolMetadata();
     const storedSessionId = localStorage.getItem(SESSION_STORAGE_KEY);
     const initialSessionId = storedSessionId || sessionIdInput.value.trim() || `agent-${Date.now()}`;
     await switchSession(initialSessionId);

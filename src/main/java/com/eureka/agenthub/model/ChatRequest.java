@@ -2,6 +2,8 @@ package com.eureka.agenthub.model;
 
 import jakarta.validation.constraints.NotBlank;
 
+import java.util.List;
+
 /**
  * /chat 请求体。
  */
@@ -21,6 +23,10 @@ public class ChatRequest {
     private String orchestrator = "";
     /** 前端测试开关：强制尝试 tools/tool_calls 协议链路。 */
     private boolean toolTestMode = false;
+    /** 受控模式下允许使用的工具白名单（空表示不限制）。 */
+    private List<String> allowedTools = List.of();
+    /** 是否允许联网工具（默认允许）。 */
+    private boolean internetEnabled = true;
 
     public String getSessionId() {
         return sessionId;
@@ -68,5 +74,21 @@ public class ChatRequest {
 
     public void setToolTestMode(boolean toolTestMode) {
         this.toolTestMode = toolTestMode;
+    }
+
+    public List<String> getAllowedTools() {
+        return allowedTools;
+    }
+
+    public void setAllowedTools(List<String> allowedTools) {
+        this.allowedTools = allowedTools == null ? List.of() : allowedTools;
+    }
+
+    public boolean isInternetEnabled() {
+        return internetEnabled;
+    }
+
+    public void setInternetEnabled(boolean internetEnabled) {
+        this.internetEnabled = internetEnabled;
     }
 }

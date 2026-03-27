@@ -9,6 +9,7 @@ import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -141,9 +142,21 @@ public class AdminController {
         return ResponseEntity.ok(mcpClientService.deleteTool(name));
     }
 
+    @PostMapping("/mcp/call")
+    public ResponseEntity<Map<String, Object>> callMcpTool(@RequestBody ToolCallRequest request) {
+        String output = mcpClientService.callTool(request.name(), request.arguments() == null ? Map.of() : request.arguments());
+        return ResponseEntity.ok(Map.of(
+                "name", request.name(),
+                "output", output
+        ));
+    }
+
     /**
      * 前端编辑 chunk 时的请求体。
      */
     public record UpdateChunkRequest(@NotBlank String source, @NotBlank String content) {
+    }
+
+    public record ToolCallRequest(@NotBlank String name, Map<String, Object> arguments) {
     }
 }

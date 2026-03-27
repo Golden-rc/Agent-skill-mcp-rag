@@ -7,6 +7,7 @@ import com.eureka.agenthub.port.MemoryPort;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Set;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -22,7 +23,10 @@ class AgentChatOrchestratorTest {
         MemoryPort memoryPort = mock(MemoryPort.class);
         AgentLangChainService agentLangChainService = new AgentLangChainService(null, null) {
             @Override
-            public AgentRunResult run(String provider, List<ChatMessage> history, String userInput) {
+            public AgentRunResult run(String provider,
+                                      List<ChatMessage> history,
+                                      String userInput,
+                                      ToolPolicy toolPolicy) {
                 return new AgentRunResult(
                         "上海当前多云，23°C",
                         List.of("query_weather"),
@@ -59,7 +63,10 @@ class AgentChatOrchestratorTest {
         MemoryPort memoryPort = mock(MemoryPort.class);
         AgentLangChainService agentLangChainService = new AgentLangChainService(null, null) {
             @Override
-            public AgentRunResult run(String provider, List<ChatMessage> history, String userInput) {
+            public AgentRunResult run(String provider,
+                                      List<ChatMessage> history,
+                                      String userInput,
+                                      ToolPolicy toolPolicy) {
                 return new AgentRunResult(
                         "抱歉，翻译功能目前遇到了技术问题。",
                         List.of("translate_text"),
@@ -87,5 +94,45 @@ class AgentChatOrchestratorTest {
 
         assertEquals("翻译结果\n结果: 这是一只猫", resp.answer());
         assertTrue(resp.toolErrors().isEmpty());
+    }
+
+    @Test
+    void shouldPassToolPolicyFromRequest() {
+        MemoryPort memoryPort = mock(MemoryPort.class);
+        AgentLangChainService agentLangChainService = new AgentLangChainService(null, null) {
+            @Override
+            public AgentRunResult run(String provider,
+                                      List<ChatMessage> history,
+                                      String userInput,
+                                      ToolPolicy toolPolicy) {
+                assertEquals(Set.of("translate_text"), toolPolicy.allowedTools());
+                assertTrue(!toolPolicy.internetEnabled());
+                return new AgentRunResult(
+                        "ok",
+                        List.of(),
+                        List.of(),
+                        List.of(),
+                        10,
+                        0,
+                        true,
+                        ""
+                );
+            }
+        };
+        AppProperties properties = new AppProperties();
+        properties.getChat().setToolCallingEnabled(true);
+
+        AgentChatOrchestrator orchestrator = new AgentChatOrchestrator(memoryPort, null, properties, agentLangChainService);
+
+        ChatRequest request = new ChatRequest();
+        request.setSessionId("agent-s3");
+        request.setMessage("测试策略");
+        request.setAllowedTools(List.of("translate_text", " "));
+        request.setInternetEnabled(false);
+
+        org.mockito.Mockito.when(memoryPort.loadHistory("agent-s3")).thenReturn(List.of());
+
+        var resp = orchestrator.chat(request, "openai");
+        assertEquals("ok", resp.answer());
     }
 }
