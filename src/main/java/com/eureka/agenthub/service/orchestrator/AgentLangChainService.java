@@ -9,6 +9,8 @@ import dev.langchain4j.service.AiServices;
 import dev.langchain4j.service.SystemMessage;
 import org.springframework.stereotype.Service;
 
+import com.eureka.agenthub.model.SseEvent;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -18,6 +20,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.function.Consumer;
 import java.util.regex.Pattern;
 
 @Service
@@ -63,9 +66,20 @@ public class AgentLangChainService {
                               List<ChatMessage> history,
                               String userInput,
                               ToolPolicy toolPolicy) {
+        return run(provider, history, userInput, toolPolicy, null);
+    }
+
+    /**
+     * 带 SSE 事件回调的 run，工具调用前后实时推送 tool_start / tool_done。
+     */
+    public AgentRunResult run(String provider,
+                              List<ChatMessage> history,
+                              String userInput,
+                              ToolPolicy toolPolicy,
+                              Consumer<SseEvent> emitter) {
         // 每次请求都创建新的工具收集器，避免并发会话污染。
-        ToolCallCollector collector = new ToolCallCollector();
-        AgentTools tools = new AgentTools(toolExecutorPort, collector, toolPolicy == null ? ToolPolicy.allowAll() : toolPolicy);
+        ToolCallCollector collector = new ToolCallCollector(emitter);
+        AgentTools tools = new AgentTools(toolExecutorPort, collector, toolPolicy == null ? ToolPolicy.allowAll() : toolPolicy, emitter);
         AgentAssistant assistant = AiServices.builder(AgentAssistant.class)
                 .chatLanguageModel(modelClientService.chatModel(provider))
                 .tools(tools)
@@ -144,11 +158,17 @@ public class AgentLangChainService {
         private final ToolCallCollector collector;
         private final Map<String, String> memoizedResults = new HashMap<>();
         private final ToolPolicy toolPolicy;
+        private final Consumer<SseEvent> emitter;
 
         AgentTools(ToolExecutorPort toolExecutorPort, ToolCallCollector collector, ToolPolicy toolPolicy) {
+            this(toolExecutorPort, collector, toolPolicy, null);
+        }
+
+        AgentTools(ToolExecutorPort toolExecutorPort, ToolCallCollector collector, ToolPolicy toolPolicy, Consumer<SseEvent> emitter) {
             this.toolExecutorPort = toolExecutorPort;
             this.collector = collector;
             this.toolPolicy = toolPolicy == null ? ToolPolicy.allowAll() : toolPolicy;
+            this.emitter = emitter;
         }
 
         ToolPolicy policy() {
@@ -291,6 +311,8 @@ public class AgentLangChainService {
                 return memoizedResults.get(signature);
             }
 
+            emit(SseEvent.toolStart(toolName));
+
             String output;
             try {
                 output = toolExecutorPort.callTool(toolName, args);
@@ -302,6 +324,15 @@ public class AgentLangChainService {
             String safeOutput = output == null ? "" : output;
             memoizedResults.put(signature, safeOutput);
             return safeOutput;
+        }
+
+        private void emit(SseEvent event) {
+            if (emitter != null) {
+                try {
+                    emitter.accept(event);
+                } catch (Exception ignored) {
+                }
+            }
         }
 
         private String checkPolicy(String toolName) {
@@ -328,6 +359,15 @@ public class AgentLangChainService {
         private final List<String> toolErrors = new ArrayList<>();
         private final List<String> imageUrls = new ArrayList<>();
         private final List<String> successfulOutputs = new ArrayList<>();
+        private final Consumer<SseEvent> emitter;
+
+        ToolCallCollector() {
+            this(null);
+        }
+
+        ToolCallCollector(Consumer<SseEvent> emitter) {
+            this.emitter = emitter;
+        }
 
         void record(String toolName, String output) {
             toolCalls.add(toolName);
@@ -340,6 +380,13 @@ public class AgentLangChainService {
             String imageUrl = extractPngUrl(output);
             if (!imageUrl.isBlank()) {
                 imageUrls.add(imageUrl);
+            }
+            if (emitter != null) {
+                String snippet = output == null ? "" : (output.length() > 100 ? output.substring(0, 100) + "…" : output);
+                try {
+                    emitter.accept(SseEvent.toolDone(toolName, snippet));
+                } catch (Exception ignored) {
+                }
             }
         }
 

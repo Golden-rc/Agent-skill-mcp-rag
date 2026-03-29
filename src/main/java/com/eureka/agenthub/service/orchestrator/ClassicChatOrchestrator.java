@@ -5,6 +5,7 @@ import com.eureka.agenthub.model.ChatMessage;
 import com.eureka.agenthub.model.ChatRequest;
 import com.eureka.agenthub.model.ChatResponse;
 import com.eureka.agenthub.model.RagHit;
+import com.eureka.agenthub.model.SseEvent;
 import com.eureka.agenthub.model.ToolCallRequest;
 import com.eureka.agenthub.model.ToolChatResult;
 import com.eureka.agenthub.model.ToolDefinition;
@@ -23,6 +24,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.regex.Pattern;
 
 @Component
@@ -115,7 +120,7 @@ public class ClassicChatOrchestrator implements ChatOrchestrator {
 
         String answer;
         if (protocolEligible) {
-            ProtocolChatResult protocolResult = chatWithToolProtocol(provider, history, userMessage, packedHits, toolCalls, imageUrls);
+            ProtocolChatResult protocolResult = chatWithToolProtocol(provider, history, userMessage, packedHits, toolCalls, imageUrls, null);
             answer = protocolResult.answer();
             toolProtocolUsed = protocolResult.used();
             toolRounds = protocolResult.rounds();
@@ -273,7 +278,8 @@ public class ClassicChatOrchestrator implements ChatOrchestrator {
                                                     String userInput,
                                                     List<RagHit> hits,
                                                     List<String> toolCalls,
-                                                    List<String> imageUrls) {
+                                                    List<String> imageUrls,
+                                                    Consumer<SseEvent> emitter) {
         List<String> toolErrors = new ArrayList<>();
         List<Long> roundLatenciesMs = new ArrayList<>();
         List<ToolDefinition> tools = toolExecutorPort.listCallableTools();
@@ -323,6 +329,7 @@ public class ClassicChatOrchestrator implements ChatOrchestrator {
 
             for (ToolCallRequest call : calls) {
                 toolCalls.add(call.name());
+                emitSafe(emitter, SseEvent.toolStart(call.name()));
                 String output;
                 boolean failedByException = false;
                 try {
@@ -341,6 +348,8 @@ public class ClassicChatOrchestrator implements ChatOrchestrator {
                 if (!imageUrl.isBlank()) {
                     imageUrls.add(imageUrl);
                 }
+                String snippet = output == null ? "" : (output.length() > 100 ? output.substring(0, 100) + "…" : output);
+                emitSafe(emitter, SseEvent.toolDone(call.name(), snippet));
                 messages.add(Map.of("role", "tool", "tool_call_id", call.id(), "content", output == null ? "" : output));
             }
             roundLatenciesMs.add((System.nanoTime() - roundStart) / 1_000_000L);
@@ -439,6 +448,156 @@ public class ClassicChatOrchestrator implements ChatOrchestrator {
             compact.add(new RagHit(hit.source(), limitLength(content, maxChars), hit.score()));
         }
         return compact;
+    }
+
+    @Override
+    public void stream(ChatRequest request, String provider, Consumer<SseEvent> emitter) {
+        String userMessage = request.getMessage();
+        boolean contextualFollowUp = isContextualFollowUp(userMessage);
+        String mode = normalizeMode(request.getMode());
+        boolean screenshotIntent = isScreenshotIntent(userMessage);
+
+        emitter.accept(SseEvent.status("分析请求..."));
+
+        ModeDecision modeDecision = "auto".equals(mode)
+                ? (screenshotIntent
+                ? new ModeDecision("direct", "rule-screenshot-tool")
+                : classifyAutoMode(provider, userMessage))
+                : new ModeDecision(mode, "manual-" + mode);
+        String effectiveMode = modeDecision.mode();
+        boolean directMode = "direct".equals(effectiveMode);
+        boolean forceToolProtocol = request.isToolTestMode();
+        boolean protocolEligible = shouldUseToolProtocol(provider, forceToolProtocol)
+                && (!directMode || screenshotIntent || forceToolProtocol);
+
+        List<ChatMessage> history = memoryPort.loadHistory(request.getSessionId());
+        if (directMode) {
+            int directHistoryLimit = Math.max(0, appProperties.getMemory().getDirectHistoryMessages());
+            history = takeLastMessages(history, directHistoryLimit);
+        }
+
+        boolean skipRetrieval = forceToolProtocol && protocolEligible;
+        List<RagHit> hits;
+        if (directMode || skipRetrieval) {
+            hits = Collections.emptyList();
+        } else {
+            emitter.accept(SseEvent.status("检索知识库..."));
+            hits = retrieverPort.retrieve(userMessage, 5);
+        }
+        List<RagHit> packedHits = RagContextPacker.pack(
+                hits,
+                appProperties.getRag().getContextMaxChars(),
+                appProperties.getRag().getContextChunkMaxChars()
+        );
+
+        List<String> toolCalls = new ArrayList<>();
+        List<String> imageUrls = new ArrayList<>();
+        List<String> toolErrors = new ArrayList<>();
+        List<Long> toolRoundLatenciesMs = new ArrayList<>();
+        boolean toolProtocolUsed = false;
+        int toolRounds = 0;
+
+        if (!directMode && !protocolEligible && isInsufficientEvidence(packedHits, contextualFollowUp)) {
+            String answer = insufficientEvidenceAnswer();
+            memoryPort.append(request.getSessionId(), new ChatMessage("user", userMessage));
+            memoryPort.append(request.getSessionId(), new ChatMessage("assistant", answer));
+            emitTokens(emitter, answer);
+            emitter.accept(SseEvent.done(new ChatResponse(answer, provider, List.of(), toolCalls, imageUrls,
+                    false, 0, toolRoundLatenciesMs, toolErrors, "", "", effectiveMode, "rule-insufficient-evidence")));
+            return;
+        }
+
+        List<ChatMessage> prompt = new ArrayList<>();
+        prompt.add(new ChatMessage("system", CHAT_SYSTEM_PROMPT));
+        prompt.addAll(history);
+        prompt.add(new ChatMessage("user", buildUserPrompt(userMessage, packedHits, "")));
+
+        String answer;
+        if (protocolEligible) {
+            emitter.accept(SseEvent.status("调用工具..."));
+            ProtocolChatResult protocolResult = chatWithToolProtocol(provider, history, userMessage, packedHits, toolCalls, imageUrls, emitter);
+            answer = protocolResult.answer();
+            toolProtocolUsed = protocolResult.used();
+            toolRounds = protocolResult.rounds();
+            toolErrors.addAll(protocolResult.errors());
+            toolRoundLatenciesMs.addAll(protocolResult.roundLatenciesMs());
+            emitter.accept(SseEvent.status("整理回答..."));
+            emitTokens(emitter, answer);
+        } else {
+            if (request.isToolTestMode()) {
+                toolErrors.add("tool test mode requires openai provider");
+            }
+            ToolRouteResult toolRouteResult = (directMode && !screenshotIntent)
+                    ? ToolRouteResult.empty()
+                    : routeToolIfNeeded(userMessage, toolCalls, imageUrls);
+            prompt.set(prompt.size() - 1, new ChatMessage("user", buildUserPrompt(userMessage, packedHits, toolRouteResult.promptContext())));
+
+            emitter.accept(SseEvent.status("生成回答中..."));
+            answer = streamFinalAnswer(provider, prompt, emitter);
+        }
+
+        memoryPort.append(request.getSessionId(), new ChatMessage("user", userMessage));
+        memoryPort.append(request.getSessionId(), new ChatMessage("assistant", answer));
+
+        log.info("classic stream result session={} provider={} mode={} protocolUsed={} rounds={} tools={}",
+                request.getSessionId(), provider, effectiveMode, toolProtocolUsed, toolRounds, toolCalls);
+
+        emitter.accept(SseEvent.done(new ChatResponse(answer, provider, toResponseCitations(packedHits), toolCalls, imageUrls,
+                toolProtocolUsed, toolRounds, toolRoundLatenciesMs, toolErrors, "", "", effectiveMode, modeDecision.reason())));
+    }
+
+    /**
+     * 用 StreamingChatLanguageModel 流式生成最终答案，逐 token 推送。
+     * 如果流式调用失败则降级为同步调用，结果以 chunk 方式推送。
+     */
+    private String streamFinalAnswer(String provider, List<ChatMessage> prompt, Consumer<SseEvent> emitter) {
+        CountDownLatch latch = new CountDownLatch(1);
+        StringBuilder sb = new StringBuilder();
+        AtomicReference<String> fallback = new AtomicReference<>(null);
+
+        modelClientService.streamChat(provider, prompt,
+                token -> {
+                    sb.append(token);
+                    emitter.accept(SseEvent.token(token));
+                },
+                latch::countDown,
+                error -> {
+                    // 流式失败，降级为同步调用
+                    try {
+                        String syncAnswer = modelClientService.chat(provider, prompt);
+                        fallback.set(syncAnswer);
+                        emitTokens(emitter, syncAnswer);
+                    } catch (Exception ex) {
+                        emitter.accept(SseEvent.error(ex.getMessage()));
+                    }
+                    latch.countDown();
+                }
+        );
+
+        try {
+            latch.await(120, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        return fallback.get() != null ? fallback.get() : sb.toString();
+    }
+
+    /** 将文本按小块 emit 为 token 事件（用于已有完整结果时模拟流式）。 */
+    private void emitTokens(Consumer<SseEvent> emitter, String text) {
+        if (text == null || text.isEmpty()) return;
+        int chunkSize = 4;
+        for (int i = 0; i < text.length(); i += chunkSize) {
+            emitter.accept(SseEvent.token(text.substring(i, Math.min(i + chunkSize, text.length()))));
+        }
+    }
+
+    private static void emitSafe(Consumer<SseEvent> emitter, SseEvent event) {
+        if (emitter != null) {
+            try {
+                emitter.accept(event);
+            } catch (Exception ignored) {
+            }
+        }
     }
 
     private record ModeDecision(String mode, String reason) {

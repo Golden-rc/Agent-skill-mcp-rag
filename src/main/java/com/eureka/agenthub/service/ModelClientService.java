@@ -8,12 +8,18 @@ import com.eureka.agenthub.model.ToolDefinition;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.model.StreamingResponseHandler;
 import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.chat.StreamingChatLanguageModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.ollama.OllamaChatModel;
 import dev.langchain4j.model.ollama.OllamaEmbeddingModel;
+import dev.langchain4j.model.ollama.OllamaStreamingChatModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.model.openai.OpenAiEmbeddingModel;
+import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
+import dev.langchain4j.model.output.Response;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -24,6 +30,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.Consumer;
 
 /**
  * LangChain4j 模型访问层。
@@ -35,6 +42,8 @@ public class ModelClientService {
 
     private final ChatLanguageModel ollamaChatModel;
     private final ChatLanguageModel openAiChatModel;
+    private final StreamingChatLanguageModel ollamaStreamingChatModel;
+    private final StreamingChatLanguageModel openAiStreamingChatModel;
     private final EmbeddingModel ollamaEmbeddingModel;
     private final EmbeddingModel openAiEmbeddingModel;
     private final AppProperties appProperties;
@@ -68,6 +77,19 @@ public class ModelClientService {
                 .build();
 
         this.openAiChatModel = OpenAiChatModel.builder()
+                .baseUrl(appProperties.getOpenai().getBaseUrl())
+                .apiKey(appProperties.getOpenai().getApiKey())
+                .modelName(appProperties.getOpenai().getChatModel())
+                .temperature(0.2)
+                .build();
+
+        this.ollamaStreamingChatModel = OllamaStreamingChatModel.builder()
+                .baseUrl(appProperties.getOllama().getBaseUrl())
+                .modelName(appProperties.getOllama().getChatModel())
+                .temperature(0.2)
+                .build();
+
+        this.openAiStreamingChatModel = OpenAiStreamingChatModel.builder()
                 .baseUrl(appProperties.getOpenai().getBaseUrl())
                 .apiKey(appProperties.getOpenai().getApiKey())
                 .modelName(appProperties.getOpenai().getChatModel())
@@ -214,6 +236,50 @@ public class ModelClientService {
                         + ". Please set RAG_EMBED_MODEL to a valid model for your OPENAI_BASE_URL.", e);
             }
             throw new IllegalStateException("failed to generate embedding: " + rootMessage, e);
+        }
+    }
+
+    /**
+     * 流式生成回答，token 逐个回调。
+     * <p>
+     * onToken   - 每个 token 到达时调用（可能在异步线程）
+     * onComplete - 流式完成时调用
+     * onError   - 出错时调用（调用方应在此执行降级逻辑并触发完成信号）
+     */
+    public void streamChat(String provider,
+                           List<ChatMessage> messages,
+                           Consumer<String> onToken,
+                           Runnable onComplete,
+                           Consumer<Throwable> onError) {
+        String prompt = toPrompt(messages);
+        StreamingChatLanguageModel model = switch (provider) {
+            case "ollama" -> ollamaStreamingChatModel;
+            case "openai" -> openAiStreamingChatModel;
+            default -> {
+                onError.accept(new IllegalArgumentException("unsupported provider for streaming: " + provider));
+                yield null;
+            }
+        };
+        if (model == null) return;
+        try {
+            model.generate(prompt, new StreamingResponseHandler<AiMessage>() {
+                @Override
+                public void onNext(String token) {
+                    onToken.accept(token);
+                }
+
+                @Override
+                public void onComplete(Response<AiMessage> response) {
+                    onComplete.run();
+                }
+
+                @Override
+                public void onError(Throwable error) {
+                    onError.accept(error);
+                }
+            });
+        } catch (Exception e) {
+            onError.accept(e);
         }
     }
 

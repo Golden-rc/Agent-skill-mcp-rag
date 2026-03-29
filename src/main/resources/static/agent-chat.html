@@ -404,7 +404,7 @@
     addMsg("user", message);
     const assistantNode = addMsg("assistant", "思考中...");
     const run = createRunRecord(message);
-    run.line("请求已发送到 /chat");
+    run.line("请求已发送到 /chat/stream");
     const stopProgress = startAgentProgress(statusEl, assistantNode, (phase) => {
       run.line(`阶段: ${phase}`);
     });
@@ -418,37 +418,87 @@
         message
       };
       attachToolPolicyIntoPayload(payload);
-      const data = await api("/chat", { method: "POST", body: JSON.stringify(payload) });
-      assistantNode.textContent = data.answer || "";
-      run.line(`协议: ${data.toolProtocolUsed ? "tool_calls" : "plain"}`);
-      run.line(`工具: ${(data.toolCalls || []).join(", ") || "none"}`);
-      if (payload.allowedTools && payload.allowedTools.length > 0) {
-        run.line(`白名单: ${payload.allowedTools.join(", ")}`);
-      }
-      run.line(`联网: ${payload.internetEnabled !== false ? "enabled" : "disabled"}`);
-      run.line(`回合: ${Number(data.toolRounds || 0)} · 延迟: ${((data.toolRoundLatenciesMs || []).join("/") || "-")}ms`);
-      if ((data.toolErrors || []).length > 0) {
-        run.line(`工具错误: ${(data.toolErrors || []).join(" | ")}`);
-      }
-      run.done("响应完成");
 
-      metaEl.textContent = JSON.stringify({
-        orchestratorUsed: data.orchestratorUsed,
-        orchestratorReason: data.orchestratorReason,
-        providerUsed: data.providerUsed,
-        modeUsed: data.modeUsed,
-        modeReason: data.modeReason,
-        toolProtocolUsed: data.toolProtocolUsed,
-        toolRounds: data.toolRounds,
-        toolRoundLatenciesMs: data.toolRoundLatenciesMs,
-        toolCalls: data.toolCalls,
-        toolErrors: data.toolErrors
-      }, null, 2);
+      // SSE 流式请求
+      const response = await fetch("/chat/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
-      setStatus(statusEl, "请求成功", "ok");
-      messageInput.value = "";
-      persistToolPolicy();
-      await loadSessionList();
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let fullText = "";
+
+      assistantNode.textContent = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split("\n");
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          if (!line.startsWith("data:")) continue;
+          const raw = line.slice(5).trim();
+          if (!raw) continue;
+          let event;
+          try { event = JSON.parse(raw); } catch { continue; }
+
+          if (event.type === "token") {
+            fullText += event.text || "";
+            assistantNode.textContent = fullText;
+          } else if (event.type === "status") {
+            setStatus(statusEl, event.msg || "处理中...");
+            run.line(`状态: ${event.msg || ""}`);
+          } else if (event.type === "tool_start") {
+            setStatus(statusEl, `调用工具: ${event.name || ""}`);
+            run.line(`工具开始: ${event.name || ""}`);
+          } else if (event.type === "tool_done") {
+            setStatus(statusEl, `工具完成: ${event.name || ""}`);
+            run.line(`工具完成: ${event.name || ""}${event.text ? " → " + event.text.slice(0, 80) : ""}`);
+          } else if (event.type === "done") {
+            stopProgress();
+            const data = event.data || {};
+            assistantNode.textContent = fullText || data.answer || "";
+            run.line(`协议: ${data.toolProtocolUsed ? "tool_calls" : "plain"}`);
+            run.line(`工具: ${(data.toolCalls || []).join(", ") || "none"}`);
+            if (payload.allowedTools && payload.allowedTools.length > 0) {
+              run.line(`白名单: ${payload.allowedTools.join(", ")}`);
+            }
+            run.line(`联网: ${payload.internetEnabled !== false ? "enabled" : "disabled"}`);
+            run.line(`回合: ${Number(data.toolRounds || 0)} · 延迟: ${((data.toolRoundLatenciesMs || []).join("/") || "-")}ms`);
+            if ((data.toolErrors || []).length > 0) {
+              run.line(`工具错误: ${(data.toolErrors || []).join(" | ")}`);
+            }
+            run.done("响应完成");
+
+            metaEl.textContent = JSON.stringify({
+              orchestratorUsed: data.orchestratorUsed,
+              orchestratorReason: data.orchestratorReason,
+              providerUsed: data.providerUsed,
+              modeUsed: data.modeUsed,
+              modeReason: data.modeReason,
+              toolProtocolUsed: data.toolProtocolUsed,
+              toolRounds: data.toolRounds,
+              toolRoundLatenciesMs: data.toolRoundLatenciesMs,
+              toolCalls: data.toolCalls,
+              toolErrors: data.toolErrors
+            }, null, 2);
+
+            setStatus(statusEl, "请求成功", "ok");
+            messageInput.value = "";
+            persistToolPolicy();
+            await loadSessionList();
+          } else if (event.type === "error") {
+            throw new Error(event.msg || "流式请求出错");
+          }
+        }
+      }
     } catch (e) {
       assistantNode.textContent = "请求失败: " + e.message;
       setStatus(statusEl, e.message, "error");

@@ -4,6 +4,7 @@ import com.eureka.agenthub.config.AppProperties;
 import com.eureka.agenthub.model.ChatMessage;
 import com.eureka.agenthub.model.ChatRequest;
 import com.eureka.agenthub.model.ChatResponse;
+import com.eureka.agenthub.model.SseEvent;
 import com.eureka.agenthub.port.MemoryPort;
 import com.eureka.agenthub.service.ModelClientService;
 import org.slf4j.Logger;
@@ -14,6 +15,10 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.regex.Pattern;
 
 /**
@@ -110,6 +115,89 @@ public class AgentChatOrchestrator implements ChatOrchestrator {
                 "agent",
                 protocolEnabled ? "agent-tool-protocol" : "agent-direct"
         );
+    }
+
+    @Override
+    public void stream(ChatRequest request, String provider, Consumer<SseEvent> emitter) {
+        List<ChatMessage> history = memoryPort.loadHistory(request.getSessionId());
+
+        List<String> toolCalls = new ArrayList<>();
+        List<String> toolErrors = new ArrayList<>();
+        List<String> imageUrls = new ArrayList<>();
+        List<Long> roundLatenciesMs = new ArrayList<>();
+
+        boolean protocolEnabled = "openai".equals(provider) && appProperties.getChat().isToolCallingEnabled();
+        String answer;
+        int rounds = 0;
+
+        emitter.accept(SseEvent.status("启动 Agent..."));
+
+        if (protocolEnabled) {
+            AgentLangChainService.ToolPolicy toolPolicy = new AgentLangChainService.ToolPolicy(
+                    normalizeAllowedTools(request.getAllowedTools()),
+                    request.isInternetEnabled()
+            );
+            AgentLangChainService.AgentRunResult result = agentLangChainService.run(
+                    provider, history, request.getMessage(), toolPolicy, emitter);
+            answer = normalizeFinalAnswer(result);
+            rounds = result.rounds();
+            toolCalls.addAll(result.toolCalls());
+            toolErrors.addAll(result.toolErrors());
+            imageUrls.addAll(result.imageUrls());
+            roundLatenciesMs.add(result.latencyMs());
+        } else {
+            List<ChatMessage> prompt = new ArrayList<>();
+            prompt.add(new ChatMessage("system", AGENT_SYSTEM_PROMPT));
+            prompt.addAll(history);
+            prompt.add(new ChatMessage("user", request.getMessage()));
+            emitter.accept(SseEvent.status("生成回答中..."));
+            answer = streamAnswer(provider, prompt, emitter);
+        }
+
+        memoryPort.append(request.getSessionId(), new ChatMessage("user", request.getMessage()));
+        memoryPort.append(request.getSessionId(), new ChatMessage("assistant", answer));
+
+        log.info("agent stream result session={} provider={} protocol={} rounds={} tools={}",
+                request.getSessionId(), provider, protocolEnabled, rounds, toolCalls);
+
+        emitter.accept(SseEvent.done(new ChatResponse(
+                answer, provider, List.of(), toolCalls, imageUrls,
+                protocolEnabled, rounds, roundLatenciesMs, toolErrors,
+                "", "", "agent", protocolEnabled ? "agent-tool-protocol" : "agent-direct"
+        )));
+    }
+
+    private String streamAnswer(String provider, List<ChatMessage> prompt, Consumer<SseEvent> emitter) {
+        CountDownLatch latch = new CountDownLatch(1);
+        StringBuilder sb = new StringBuilder();
+        AtomicReference<String> fallback = new AtomicReference<>(null);
+
+        modelClientService.streamChat(provider, prompt,
+                token -> {
+                    sb.append(token);
+                    emitter.accept(SseEvent.token(token));
+                },
+                latch::countDown,
+                error -> {
+                    try {
+                        String syncAnswer = modelClientService.chat(provider, prompt);
+                        fallback.set(syncAnswer);
+                        for (int i = 0; i < syncAnswer.length(); i += 4) {
+                            emitter.accept(SseEvent.token(syncAnswer.substring(i, Math.min(i + 4, syncAnswer.length()))));
+                        }
+                    } catch (Exception ex) {
+                        emitter.accept(SseEvent.error(ex.getMessage()));
+                    }
+                    latch.countDown();
+                }
+        );
+
+        try {
+            latch.await(120, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        return fallback.get() != null ? fallback.get() : sb.toString();
     }
 
     private Set<String> normalizeAllowedTools(List<String> values) {

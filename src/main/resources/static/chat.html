@@ -885,60 +885,118 @@
         payload.orchestrator = orchestratorSelect.value;
       }
 
-      const data = await api("/chat", { method: "POST", body: JSON.stringify(payload) });
-      stopProgress();
-      chatKpi.innerHTML =
-        `<span class="tag">provider: ${esc(data.providerUsed || "-")}</span>` +
-        `<span class="tag">mode: ${esc(data.modeUsed || "-")}</span>` +
-        `<span class="tag">reason: ${esc(data.modeReason || "-")}</span>` +
-        `<span class="tag">orch: ${esc(data.orchestratorUsed || "-")}</span>` +
-        `<span class="tag">orchReason: ${esc(data.orchestratorReason || "-")}</span>` +
-        `<span class="tag">tools: ${esc((data.toolCalls || []).join(", ") || "none")}</span>` +
-        `<span class="tag">citations: ${(data.citations || []).length}</span>` +
-        `<span class="tag">images: ${(data.imageUrls || []).length}</span>` +
-        `<span class="tag">toolProtocol: ${data.toolProtocolUsed ? "on" : "off"}</span>` +
-        `<span class="tag">rounds: ${Number(data.toolRounds || 0)}</span>` +
-        `<span class="tag">latencies: ${((data.toolRoundLatenciesMs || []).join("/") || "-")}</span>`;
-
-      let out = data.answer || "";
-      if ((data.citations || []).length > 0) {
-        out += "\n\n---\n引用:\n";
-        (data.citations || []).forEach((c, idx) => {
-          out += `${idx + 1}. [${c.source}] score=${(c.score || 0).toFixed(4)} ${shortText(c.content)}\n`;
-        });
+      // SSE 流式请求
+      const response = await fetch("/chat/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
       }
-      await typeText(assistantEl, out, 15);
-      renderToolImages(assistantEl.body, data.imageUrls || []);
 
-      chatMeta.textContent = JSON.stringify({
-        provider: data.providerUsed,
-        modeUsed: data.modeUsed,
-        modeReason: data.modeReason,
-        orchestratorUsed: data.orchestratorUsed,
-        orchestratorReason: data.orchestratorReason,
-        toolCalls: data.toolCalls || [],
-        toolProtocolUsed: Boolean(data.toolProtocolUsed),
-        toolRounds: Number(data.toolRounds || 0),
-        toolRoundLatenciesMs: data.toolRoundLatenciesMs || [],
-        toolErrors: data.toolErrors || [],
-        imageUrls: data.imageUrls || [],
-        citations: (data.citations || []).length,
-        requestMode: modeSelect.value,
-        requestOrchestrator: orchestratorSelect.value,
-        toolTestMode: toolTestModeSelect.value,
-        sessionId
-      }, null, 2);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let fullText = "";
 
-      toolProtocolView.textContent = JSON.stringify({
-        toolProtocolUsed: Boolean(data.toolProtocolUsed),
-        rounds: Number(data.toolRounds || 0),
-        roundLatenciesMs: data.toolRoundLatenciesMs || [],
-        calls: data.toolCalls || [],
-        errors: data.toolErrors || []
-      }, null, 2);
+      assistantEl.body.textContent = "";
+      assistantEl.body.classList.add("typing");
 
-      setStatus(chatStatus, "请求成功", "ok");
-      await loadSessionList();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split("\n");
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          if (!line.startsWith("data:")) continue;
+          const raw = line.slice(5).trim();
+          if (!raw) continue;
+          let event;
+          try { event = JSON.parse(raw); } catch { continue; }
+
+          if (event.type === "token") {
+            fullText += event.text || "";
+            assistantEl.body.textContent += event.text || "";
+            timeline.scrollTop = timeline.scrollHeight;
+          } else if (event.type === "status") {
+            setStatus(chatStatus, event.msg || "处理中...");
+            if (assistantEl.body.textContent.startsWith("思考中")) {
+              assistantEl.body.textContent = event.msg || "处理中...";
+            }
+          } else if (event.type === "tool_start") {
+            setStatus(chatStatus, `调用工具: ${event.name || ""}`);
+          } else if (event.type === "tool_done") {
+            setStatus(chatStatus, `工具完成: ${event.name || ""}`);
+          } else if (event.type === "done") {
+            stopProgress();
+            assistantEl.body.classList.remove("typing");
+            const data = event.data || {};
+
+            // 补充引用到正文
+            let out = fullText;
+            if ((data.citations || []).length > 0) {
+              out += "\n\n---\n引用:\n";
+              (data.citations || []).forEach((c, idx) => {
+                out += `${idx + 1}. [${c.source}] score=${(c.score || 0).toFixed(4)} ${shortText(c.content)}\n`;
+              });
+            }
+            renderRichMessage(assistantEl.body, out);
+            renderToolImages(assistantEl.body, data.imageUrls || []);
+
+            chatKpi.innerHTML =
+              `<span class="tag">provider: ${esc(data.providerUsed || "-")}</span>` +
+              `<span class="tag">mode: ${esc(data.modeUsed || "-")}</span>` +
+              `<span class="tag">reason: ${esc(data.modeReason || "-")}</span>` +
+              `<span class="tag">orch: ${esc(data.orchestratorUsed || "-")}</span>` +
+              `<span class="tag">orchReason: ${esc(data.orchestratorReason || "-")}</span>` +
+              `<span class="tag">tools: ${esc((data.toolCalls || []).join(", ") || "none")}</span>` +
+              `<span class="tag">citations: ${(data.citations || []).length}</span>` +
+              `<span class="tag">images: ${(data.imageUrls || []).length}</span>` +
+              `<span class="tag">toolProtocol: ${data.toolProtocolUsed ? "on" : "off"}</span>` +
+              `<span class="tag">rounds: ${Number(data.toolRounds || 0)}</span>` +
+              `<span class="tag">latencies: ${((data.toolRoundLatenciesMs || []).join("/") || "-")}</span>`;
+
+            chatMeta.textContent = JSON.stringify({
+              provider: data.providerUsed,
+              modeUsed: data.modeUsed,
+              modeReason: data.modeReason,
+              orchestratorUsed: data.orchestratorUsed,
+              orchestratorReason: data.orchestratorReason,
+              toolCalls: data.toolCalls || [],
+              toolProtocolUsed: Boolean(data.toolProtocolUsed),
+              toolRounds: Number(data.toolRounds || 0),
+              toolRoundLatenciesMs: data.toolRoundLatenciesMs || [],
+              toolErrors: data.toolErrors || [],
+              imageUrls: data.imageUrls || [],
+              citations: (data.citations || []).length,
+              requestMode: modeSelect.value,
+              requestOrchestrator: orchestratorSelect.value,
+              toolTestMode: toolTestModeSelect.value,
+              sessionId
+            }, null, 2);
+
+            toolProtocolView.textContent = JSON.stringify({
+              toolProtocolUsed: Boolean(data.toolProtocolUsed),
+              rounds: Number(data.toolRounds || 0),
+              roundLatenciesMs: data.toolRoundLatenciesMs || [],
+              calls: data.toolCalls || [],
+              errors: data.toolErrors || []
+            }, null, 2);
+
+            setStatus(chatStatus, "请求成功", "ok");
+            await loadSessionList();
+          } else if (event.type === "error") {
+            throw new Error(event.msg || "流式请求出错");
+          }
+        }
+      }
+
+      assistantEl.body.classList.remove("typing");
+      messageInput.value = "";
     } catch (e) {
       stopProgress();
       setStatus(chatStatus, e.message, "error");
