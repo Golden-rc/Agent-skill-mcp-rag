@@ -3,11 +3,14 @@ package com.eureka.agenthub.service.orchestrator;
 import com.eureka.agenthub.config.AppProperties;
 import com.eureka.agenthub.model.ChatMessage;
 import com.eureka.agenthub.model.ChatRequest;
+import com.eureka.agenthub.model.SseEvent;
 import com.eureka.agenthub.port.MemoryPort;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Consumer;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -134,5 +137,52 @@ class AgentChatOrchestratorTest {
 
         var resp = orchestrator.chat(request, "openai");
         assertEquals("ok", resp.answer());
+    }
+
+    @Test
+    void shouldEmitSseEventsForAgentStreamPath() {
+        MemoryPort memoryPort = mock(MemoryPort.class);
+        AgentLangChainService agentLangChainService = new AgentLangChainService(null, null) {
+            @Override
+            public AgentRunResult run(String provider,
+                                      List<ChatMessage> history,
+                                      String userInput,
+                                      ToolPolicy toolPolicy,
+                                      Consumer<SseEvent> emitter) {
+                emitter.accept(SseEvent.toolStart("translate_text"));
+                emitter.accept(SseEvent.toolDone("translate_text", "结果: 这是一只猫"));
+                emitter.accept(SseEvent.token("这是一只猫"));
+                return new AgentRunResult(
+                        "这是一只猫",
+                        List.of("translate_text"),
+                        List.of(),
+                        List.of(),
+                        100,
+                        1,
+                        true,
+                        "这是一只猫"
+                );
+            }
+        };
+        AppProperties properties = new AppProperties();
+        properties.getChat().setToolCallingEnabled(true);
+
+        AgentChatOrchestrator orchestrator = new AgentChatOrchestrator(memoryPort, null, properties, agentLangChainService);
+
+        ChatRequest request = new ChatRequest();
+        request.setSessionId("agent-stream-1");
+        request.setMessage("翻译 this is a cat");
+        request.setAllowedTools(List.of("translate_text"));
+        request.setInternetEnabled(false);
+
+        org.mockito.Mockito.when(memoryPort.loadHistory("agent-stream-1")).thenReturn(List.of());
+
+        List<SseEvent> events = new ArrayList<>();
+        orchestrator.stream(request, "openai", events::add);
+
+        assertTrue(events.stream().anyMatch(e -> "status".equals(e.type())));
+        assertTrue(events.stream().anyMatch(e -> "tool_start".equals(e.type())));
+        assertTrue(events.stream().anyMatch(e -> "tool_done".equals(e.type())));
+        assertTrue(events.stream().anyMatch(e -> "done".equals(e.type())));
     }
 }
