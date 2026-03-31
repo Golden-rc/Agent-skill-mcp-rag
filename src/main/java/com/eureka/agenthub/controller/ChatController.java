@@ -4,6 +4,7 @@ import com.eureka.agenthub.model.ChatRequest;
 import com.eureka.agenthub.model.ChatResponse;
 import com.eureka.agenthub.model.SseEvent;
 import com.eureka.agenthub.service.ChatService;
+import com.eureka.agenthub.service.StreamMetricsService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PreDestroy;
 import jakarta.validation.Valid;
@@ -23,6 +24,7 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 聊天接口入口。
@@ -32,6 +34,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class ChatController {
 
     private final ChatService chatService;
+    private final StreamMetricsService streamMetricsService;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final ExecutorService sseExecutor = new ThreadPoolExecutor(
             4,
@@ -47,8 +50,10 @@ public class ChatController {
             namedThreadFactory("chat-sse-heartbeat")
     );
 
-    public ChatController(ChatService chatService) {
+    public ChatController(ChatService chatService,
+                          StreamMetricsService streamMetricsService) {
         this.chatService = chatService;
+        this.streamMetricsService = streamMetricsService;
     }
 
     @PostMapping
@@ -64,6 +69,13 @@ public class ChatController {
     public SseEmitter stream(@Valid @RequestBody ChatRequest request) {
         SseEmitter emitter = new SseEmitter(300_000L);
         AtomicBoolean closed = new AtomicBoolean(false);
+        AtomicBoolean done = new AtomicBoolean(false);
+        AtomicBoolean metricsDone = new AtomicBoolean(false);
+        long startedAt = System.nanoTime();
+        AtomicInteger tokenChars = new AtomicInteger(0);
+        AtomicInteger toolStartCount = new AtomicInteger(0);
+        AtomicInteger toolDoneCount = new AtomicInteger(0);
+        streamMetricsService.onStart();
 
         Future<?> heartbeat = heartbeatExecutor.scheduleAtFixedRate(() -> {
             if (closed.get()) {
@@ -71,9 +83,13 @@ public class ChatController {
             }
             try {
                 // 保活事件，避免代理层在长时生成阶段提前断开连接。
-                emitter.send(SseEmitter.event().name("ping").data("{}"));
+                emitter.send(SseEmitter.event().data(objectMapper.writeValueAsString(java.util.Map.of(
+                        "type", "ping",
+                        "ts", System.currentTimeMillis()
+                ))));
             } catch (Exception e) {
                 closed.set(true);
+                recordErrorOnce(metricsDone, startedAt, tokenChars.get(), toolStartCount.get(), toolDoneCount.get(), e.getMessage());
                 emitter.completeWithError(e);
             }
         }, 15, 15, TimeUnit.SECONDS);
@@ -84,14 +100,29 @@ public class ChatController {
                     if (closed.get()) {
                         return;
                     }
+                    if ("done".equals(event.type())) {
+                        done.set(true);
+                    } else if ("token".equals(event.type()) && event.text() != null) {
+                        tokenChars.addAndGet(event.text().length());
+                    } else if ("tool_start".equals(event.type())) {
+                        toolStartCount.incrementAndGet();
+                    } else if ("tool_done".equals(event.type())) {
+                        toolDoneCount.incrementAndGet();
+                    }
                     try {
                         emitter.send(SseEmitter.event().data(objectMapper.writeValueAsString(event)));
                     } catch (Exception e) {
                         closed.set(true);
+                        recordErrorOnce(metricsDone, startedAt, tokenChars.get(), toolStartCount.get(), toolDoneCount.get(), e.getMessage());
                         emitter.completeWithError(e);
                     }
                 });
                 closed.set(true);
+                if (done.get()) {
+                    recordCompletedOnce(metricsDone, startedAt, tokenChars.get(), toolStartCount.get(), toolDoneCount.get());
+                } else {
+                    recordCancelledOnce(metricsDone, startedAt, tokenChars.get(), toolStartCount.get(), toolDoneCount.get());
+                }
                 emitter.complete();
             } catch (Exception e) {
                 try {
@@ -100,6 +131,7 @@ public class ChatController {
                 } catch (Exception ignored) {
                 }
                 closed.set(true);
+                recordErrorOnce(metricsDone, startedAt, tokenChars.get(), toolStartCount.get(), toolDoneCount.get(), e.getMessage());
                 emitter.completeWithError(e);
             } finally {
                 heartbeat.cancel(true);
@@ -110,17 +142,23 @@ public class ChatController {
             closed.set(true);
             job.cancel(true);
             heartbeat.cancel(true);
+            recordCancelledOnce(metricsDone, startedAt, tokenChars.get(), toolStartCount.get(), toolDoneCount.get());
             emitter.complete();
         });
         emitter.onError(error -> {
             closed.set(true);
             job.cancel(true);
             heartbeat.cancel(true);
+            recordErrorOnce(metricsDone, startedAt, tokenChars.get(), toolStartCount.get(), toolDoneCount.get(),
+                    error == null ? "unknown" : error.getMessage());
         });
         emitter.onCompletion(() -> {
             closed.set(true);
             job.cancel(true);
             heartbeat.cancel(true);
+            if (!done.get()) {
+                recordCancelledOnce(metricsDone, startedAt, tokenChars.get(), toolStartCount.get(), toolDoneCount.get());
+            }
         });
 
         return emitter;
@@ -143,5 +181,40 @@ public class ChatController {
                 return thread;
             }
         };
+    }
+
+    private void recordCompletedOnce(AtomicBoolean metricsDone,
+                                     long startedAt,
+                                     int tokenChars,
+                                     int toolStartCount,
+                                     int toolDoneCount) {
+        if (metricsDone.compareAndSet(false, true)) {
+            streamMetricsService.onCompleted(elapsedMs(startedAt), tokenChars, toolStartCount, toolDoneCount);
+        }
+    }
+
+    private void recordCancelledOnce(AtomicBoolean metricsDone,
+                                     long startedAt,
+                                     int tokenChars,
+                                     int toolStartCount,
+                                     int toolDoneCount) {
+        if (metricsDone.compareAndSet(false, true)) {
+            streamMetricsService.onCancelled(elapsedMs(startedAt), tokenChars, toolStartCount, toolDoneCount);
+        }
+    }
+
+    private void recordErrorOnce(AtomicBoolean metricsDone,
+                                 long startedAt,
+                                 int tokenChars,
+                                 int toolStartCount,
+                                 int toolDoneCount,
+                                 String message) {
+        if (metricsDone.compareAndSet(false, true)) {
+            streamMetricsService.onError(elapsedMs(startedAt), message, tokenChars, toolStartCount, toolDoneCount);
+        }
+    }
+
+    private long elapsedMs(long startedAt) {
+        return (System.nanoTime() - startedAt) / 1_000_000L;
     }
 }

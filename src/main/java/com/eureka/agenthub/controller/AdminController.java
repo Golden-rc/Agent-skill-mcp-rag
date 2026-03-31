@@ -3,6 +3,7 @@ package com.eureka.agenthub.controller;
 import com.eureka.agenthub.service.MemoryService;
 import com.eureka.agenthub.service.McpClientService;
 import com.eureka.agenthub.service.RagService;
+import com.eureka.agenthub.service.StreamMetricsService;
 import jakarta.validation.constraints.NotBlank;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
@@ -32,13 +33,16 @@ public class AdminController {
     private final RagService ragService;
     private final MemoryService memoryService;
     private final McpClientService mcpClientService;
+    private final StreamMetricsService streamMetricsService;
 
     public AdminController(RagService ragService,
                            MemoryService memoryService,
-                           McpClientService mcpClientService) {
+                           McpClientService mcpClientService,
+                           StreamMetricsService streamMetricsService) {
         this.ragService = ragService;
         this.memoryService = memoryService;
         this.mcpClientService = mcpClientService;
+        this.streamMetricsService = streamMetricsService;
     }
 
     @GetMapping("/rag/chunks")
@@ -149,6 +153,11 @@ public class AdminController {
                 "name", request.name(),
                 "output", output
         ));
+    }
+
+    @GetMapping("/metrics/stream")
+    public ResponseEntity<Map<String, Object>> streamMetrics() {
+        return ResponseEntity.ok(streamMetricsService.snapshot());
     }
 
     /**

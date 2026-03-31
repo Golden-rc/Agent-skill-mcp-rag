@@ -130,7 +130,10 @@
             <label for="message">Message</label>
             <textarea id="message" placeholder="例如：帮我查一下上海现在天气"></textarea>
           </div>
-          <button id="sendBtn">发送</button>
+          <div style="display:grid;gap:8px;">
+            <button id="sendBtn">发送</button>
+            <button id="stopBtn" type="button" class="secondary" disabled>停止生成</button>
+          </div>
         </div>
 
         <div id="meta" class="meta" style="margin-top:10px;">等待请求...</div>
@@ -143,6 +146,7 @@
 <script src="/common.js"></script>
 <script>
   const sendBtn = document.getElementById("sendBtn");
+  const stopBtn = document.getElementById("stopBtn");
   const sessionIdInput = document.getElementById("sessionId");
   const providerSelect = document.getElementById("provider");
   const modeSelect = document.getElementById("mode");
@@ -167,7 +171,52 @@
   const ALLOWED_TOOLS_STORAGE_KEY = "agent.chat.allowed.tools";
   let activeSessionId = "";
   let cachedTools = [];
+  let activeAbortController = null;
+  let isStreaming = false;
+  let lastEventAt = 0;
   const runRecords = [];
+
+  setInterval(() => {
+    if (!isStreaming || !lastEventAt) {
+      return;
+    }
+    const idleMs = Date.now() - lastEventAt;
+    if (idleMs > 25000) {
+      setStatus(statusEl, `流连接空闲 ${Math.floor(idleMs / 1000)}s，等待模型继续输出...`);
+    }
+  }, 5000);
+
+  function splitSseFrames(buffer) {
+    const normalized = buffer.replace(/\r\n/g, "\n");
+    const chunks = normalized.split("\n\n");
+    return {
+      frames: chunks.slice(0, -1),
+      rest: chunks[chunks.length - 1] || ""
+    };
+  }
+
+  function parseSseFrame(frame) {
+    const lines = frame.split("\n");
+    const dataLines = [];
+    for (const line of lines) {
+      if (!line || line.startsWith(":")) continue;
+      if (line.startsWith("data:")) {
+        dataLines.push(line.slice(5).trimStart());
+      }
+    }
+    if (dataLines.length === 0) {
+      return null;
+    }
+    const raw = dataLines.join("\n").trim();
+    if (!raw) {
+      return null;
+    }
+    try {
+      return JSON.parse(raw);
+    } catch (_) {
+      return null;
+    }
+  }
 
   function addMsg(role, text) {
     const div = document.createElement("div");
@@ -410,6 +459,7 @@
     });
 
     try {
+      isStreaming = true;
       const payload = {
         sessionId,
         provider: providerSelect.value,
@@ -420,10 +470,13 @@
       attachToolPolicyIntoPayload(payload);
 
       // SSE 流式请求
+      activeAbortController = new AbortController();
+      stopBtn.disabled = false;
       const response = await fetch("/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
+        signal: activeAbortController.signal
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
@@ -439,19 +492,19 @@
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
 
-        const lines = buffer.split("\n");
-        buffer = lines.pop();
+        const parsed = splitSseFrames(buffer);
+        buffer = parsed.rest;
 
-        for (const line of lines) {
-          if (!line.startsWith("data:")) continue;
-          const raw = line.slice(5).trim();
-          if (!raw) continue;
-          let event;
-          try { event = JSON.parse(raw); } catch { continue; }
+        for (const frame of parsed.frames) {
+          const event = parseSseFrame(frame);
+          if (!event) continue;
+          lastEventAt = Date.now();
 
           if (event.type === "token") {
             fullText += event.text || "";
             assistantNode.textContent = fullText;
+          } else if (event.type === "ping") {
+            continue;
           } else if (event.type === "status") {
             setStatus(statusEl, event.msg || "处理中...");
             run.line(`状态: ${event.msg || ""}`);
@@ -500,11 +553,27 @@
         }
       }
     } catch (e) {
-      assistantNode.textContent = "请求失败: " + e.message;
-      setStatus(statusEl, e.message, "error");
-      run.fail("请求失败: " + e.message);
+      if (e.name === "AbortError") {
+        assistantNode.textContent = (assistantNode.textContent || "") + "\n[已停止生成]";
+        setStatus(statusEl, "已停止生成", "ok");
+        run.fail("用户手动停止生成");
+      } else {
+        assistantNode.textContent = "请求失败: " + e.message;
+        setStatus(statusEl, e.message, "error");
+        run.fail("请求失败: " + e.message);
+      }
     } finally {
       stopProgress();
+      isStreaming = false;
+      activeAbortController = null;
+      stopBtn.disabled = true;
+    }
+  });
+
+  stopBtn.addEventListener("click", () => {
+    if (activeAbortController) {
+      activeAbortController.abort();
+      setStatus(statusEl, "已请求停止生成...");
     }
   });
 

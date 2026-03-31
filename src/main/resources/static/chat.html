@@ -438,7 +438,10 @@
           <textarea id="message"></textarea>
           <div class="small">回车发送，Shift+回车换行。</div>
         </div>
-        <button id="chatBtn">发送消息</button>
+        <div style="display:grid;gap:8px;">
+          <button id="chatBtn">发送消息</button>
+          <button id="stopBtn" type="button" class="secondary" disabled>停止生成</button>
+        </div>
       </div>
 
       <div id="chatMeta" class="meta">等待响应...</div>
@@ -450,6 +453,7 @@
 <script src="/common.js"></script>
 <script>
   const chatBtn = document.getElementById("chatBtn");
+  const stopBtn = document.getElementById("stopBtn");
   const sessionIdInput = document.getElementById("sessionId");
   const providerSelect = document.getElementById("provider");
   const modeSelect = document.getElementById("mode");
@@ -473,9 +477,52 @@
   const newSessionBtn = document.getElementById("newSessionBtn");
 
   let isSending = false;
+  let streamAbortController = null;
+  let lastEventAt = 0;
   let sessionOffset = 0;
   let sessionTotal = 0;
   let activeSessionId = sessionIdInput.value.trim();
+
+  setInterval(() => {
+    if (!isSending) return;
+    if (!lastEventAt) return;
+    const idleMs = Date.now() - lastEventAt;
+    if (idleMs > 25000) {
+      setStatus(chatStatus, `流连接空闲 ${Math.floor(idleMs / 1000)}s，等待模型继续输出...`);
+    }
+  }, 5000);
+
+  function splitSseFrames(buffer) {
+    const normalized = buffer.replace(/\r\n/g, "\n");
+    const chunks = normalized.split("\n\n");
+    return {
+      frames: chunks.slice(0, -1),
+      rest: chunks[chunks.length - 1] || ""
+    };
+  }
+
+  function parseSseFrame(frame) {
+    const lines = frame.split("\n");
+    const dataLines = [];
+    for (const line of lines) {
+      if (!line || line.startsWith(":")) continue;
+      if (line.startsWith("data:")) {
+        dataLines.push(line.slice(5).trimStart());
+      }
+    }
+    if (dataLines.length === 0) {
+      return null;
+    }
+    const raw = dataLines.join("\n").trim();
+    if (!raw) {
+      return null;
+    }
+    try {
+      return JSON.parse(raw);
+    } catch (_) {
+      return null;
+    }
+  }
 
   function nowTime() {
     return new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
@@ -886,10 +933,13 @@
       }
 
       // SSE 流式请求
+      streamAbortController = new AbortController();
+      stopBtn.disabled = false;
       const response = await fetch("/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
+        signal: streamAbortController.signal
       });
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
@@ -908,20 +958,20 @@
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
 
-        const lines = buffer.split("\n");
-        buffer = lines.pop();
+        const parsed = splitSseFrames(buffer);
+        buffer = parsed.rest;
 
-        for (const line of lines) {
-          if (!line.startsWith("data:")) continue;
-          const raw = line.slice(5).trim();
-          if (!raw) continue;
-          let event;
-          try { event = JSON.parse(raw); } catch { continue; }
+        for (const frame of parsed.frames) {
+          const event = parseSseFrame(frame);
+          if (!event) continue;
+          lastEventAt = Date.now();
 
           if (event.type === "token") {
             fullText += event.text || "";
             assistantEl.body.textContent += event.text || "";
             timeline.scrollTop = timeline.scrollHeight;
+          } else if (event.type === "ping") {
+            continue;
           } else if (event.type === "status") {
             setStatus(chatStatus, event.msg || "处理中...");
             if (assistantEl.body.textContent.startsWith("思考中")) {
@@ -999,12 +1049,27 @@
       messageInput.value = "";
     } catch (e) {
       stopProgress();
-      setStatus(chatStatus, e.message, "error");
-      const errMsg = appendMessage("assistant", "");
-      renderRichMessage(errMsg.body, "请求失败，请检查 API Key / 服务状态。\n" + e.message);
+      if (e.name === "AbortError") {
+        setStatus(chatStatus, "已停止生成", "ok");
+      } else {
+        setStatus(chatStatus, e.message, "error");
+        const errMsg = appendMessage("assistant", "");
+        renderRichMessage(errMsg.body, "请求失败，请检查 API Key / 服务状态。\n" + e.message);
+      }
     } finally {
       stopProgress();
+      if (streamAbortController) {
+        streamAbortController = null;
+      }
+      stopBtn.disabled = true;
       isSending = false;
+    }
+  });
+
+  stopBtn.addEventListener("click", () => {
+    if (streamAbortController) {
+      streamAbortController.abort();
+      setStatus(chatStatus, "已请求停止生成...");
     }
   });
 
