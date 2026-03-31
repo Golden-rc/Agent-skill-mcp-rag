@@ -70,21 +70,21 @@ public class StreamMetricsService {
         long total = totalRequests.sum();
         long avgDuration = total == 0 ? 0 : totalDurationMs.sum() / total;
         long avgTokenChars = total == 0 ? 0 : totalTokenChars.sum() / total;
-        Map<String, Object> out = new LinkedHashMap<>();
-        out.put("totalRequests", total);
-        out.put("activeRequests", activeRequests.sum());
-        out.put("completedRequests", completedRequests.sum());
-        out.put("cancelledRequests", cancelledRequests.sum());
-        out.put("erroredRequests", erroredRequests.sum());
-        out.put("totalDurationMs", totalDurationMs.sum());
-        out.put("avgDurationMs", avgDuration);
-        out.put("totalTokenChars", totalTokenChars.sum());
-        out.put("avgTokenChars", avgTokenChars);
-        out.put("totalToolStartEvents", totalToolStartEvents.sum());
-        out.put("totalToolDoneEvents", totalToolDoneEvents.sum());
-        out.put("lastError", lastError);
-        out.put("lastUpdatedAt", lastUpdatedAt.get());
-        return out;
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("totalRequests", total);
+        result.put("activeRequests", activeRequests.sum());
+        result.put("completedRequests", completedRequests.sum());
+        result.put("cancelledRequests", cancelledRequests.sum());
+        result.put("erroredRequests", erroredRequests.sum());
+        result.put("totalDurationMs", totalDurationMs.sum());
+        result.put("avgDurationMs", avgDuration);
+        result.put("totalTokenChars", totalTokenChars.sum());
+        result.put("avgTokenChars", avgTokenChars);
+        result.put("totalToolStartEvents", totalToolStartEvents.sum());
+        result.put("totalToolDoneEvents", totalToolDoneEvents.sum());
+        result.put("lastError", lastError);
+        result.put("lastUpdatedAt", lastUpdatedAt.get());
+        return result;
     }
 
     private void touch() {
